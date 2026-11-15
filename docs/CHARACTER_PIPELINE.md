@@ -10,12 +10,20 @@ It is built in code, so there are no model files to download or lose.
 | `src/character/textures.js` | 128x128 pixel-art atlas drawn in code: both faces and the T1 logo |
 | `src/character/toneda.js` | Proportions for YN and OG, the model itself, the GlockNina prop, and the `ToneDa` controller |
 | `src/character/anims.js` | Every animation clip, written as bone poses |
-| `viewer.html` | Model viewer: spin either form and play any clip |
+| `src/character/niggy.js` | Niggy: orb, bat wings, seven swappable faces, glow, flames, hover/flap/spin |
+| `viewer.html` | Model viewer: spin either form, play any clip, try Niggy's expressions |
 
 ## Clips
 idle, walk, run, sprint, jump, fall, land, roll, punchR, punchL, kick, fire, block, hurt, transform, song.
 
 `block`, `walk`, `hurt` and `song` exist and play in the viewer but are not wired to gameplay yet.
+
+## Niggy
+Faces are drawn in code. To use painted ones, put 512x512 transparent PNGs in `assets/niggy/` and pass them in:
+```js
+new Niggy({ faces: { idle: 'assets/niggy/niggy-face-idle.png', talking: 'assets/niggy/niggy-face-talking.png' } });
+```
+Expressions: idle, talking, laughing, mad, surprised, confused, hurt.
 
 ## Using it
 ```js

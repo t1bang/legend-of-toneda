@@ -3,6 +3,7 @@
 // unpacked into readable code. The hero is now the rigged model in ./character/.
 import * as T from '../vendor/three.module.min.js';
 import { ToneDa } from './character/toneda.js';
+import { Niggy } from './character/niggy.js';
 
 // ---------- renderer, camera, lights ----------
 const scene = new T.Scene();
@@ -18,7 +19,7 @@ const sun = new T.DirectionalLight(0xffe2b2, 2);
 sun.position.set(12, 25, 9);
 scene.add(sun);
 
-// ---------- placeholder-shape helpers (world, Niggy and Opps still use these) ----------
+// ---------- placeholder-shape helpers (the world and the Opps still use these) ----------
 const mat = color => new T.MeshLambertMaterial({ color, flatShading: true });
 const brown = mat('#70472f'), leaf = mat('#34763b'), red = mat('#9e182b'), black = mat('#1a1b24');
 function shape(geometry, material, x, y, z, parent = scene) {
@@ -73,25 +74,10 @@ scene.add(player);
 const toneda = new ToneDa();
 player.add(toneda.root);
 
-// ---------- Niggy (still the placeholder orb) ----------
-const demon = new T.Group();
-scene.add(demon);
-demon.add(new T.PointLight('#ff182e', 1.8, 4));
-ball(0.33, new T.MeshBasicMaterial({ color: '#ff1738' }), 0, 0, 0, demon);
-const white = new T.MeshBasicMaterial({ color: '#ffffff' });
-for (const x of [-0.13, 0.13]) {
-  const eye = shape(new T.ConeGeometry(0.12, 0.2, 3), white, x, 0.08, 0.3, demon);
-  eye.rotation.z = x < 0 ? -0.5 : 0.5;
-}
-cube(0.34, 0.08, 0.05, black, 0, -0.14, 0.31, demon);
-for (let i = 0; i < 5; i++) {
-  const tooth = shape(new T.ConeGeometry(0.045, 0.12, 3), white, -0.14 + i * 0.07, -0.19, 0.35, demon);
-  tooth.rotation.z = Math.PI;
-}
-for (const x of [-0.38, 0.38]) {
-  const wing = shape(new T.ConeGeometry(0.29, 0.56, 3), black, x, 0.1, 0, demon);
-  wing.rotation.z = x < 0 ? -0.95 : 0.95;
-}
+// ---------- Niggy (demon companion) ----------
+const niggy = new Niggy();
+scene.add(niggy.root);
+const niggyTarget = new T.Vector3();
 
 // ---------- Opps (still placeholders) ----------
 const enemies = [];
@@ -109,12 +95,12 @@ for (let i = 0; i < 3; i++) {
 const keys = new Set();
 let active = false, og = false, jump = 0, velocity = 0, yaw = 0, facing = 0;
 let attackCooldown = 0, rollTime = 0, combo = 0, kills = 0;
-let dialog = [], index = 0, open = false, timer;
+let dialog = [], index = 0, open = false, timer, speaker = '', typing = false;
 const panel = document.getElementById('box'), words = document.getElementById('words');
 
 // ---------- dialogue ----------
 function say(lines, who = 'NIGGY') {
-  dialog = lines; index = 0; open = true;
+  dialog = lines; index = 0; open = true; speaker = who;
   panel.style.display = 'block';
   document.getElementById('who').textContent = who;
   line();
@@ -123,15 +109,17 @@ function line() {
   clearInterval(timer);
   words.textContent = '';
   let n = 0;
+  typing = true;
   timer = setInterval(() => {
     words.textContent = dialog[index].slice(0, ++n);
-    if (n >= dialog[index].length) clearInterval(timer);
+    if (n >= dialog[index].length) { clearInterval(timer); typing = false; }
   }, 25);
 }
 const NIGGY_INTRO = ['Ayy, listen!', 'My name Niggy, and I’m a demon. Ain’t no fairy shit going on over here, gang. Type shit.'];
 function talk() {
   if (open) {
     clearInterval(timer);
+    typing = false;
     if (words.textContent.length < dialog[index].length) { words.textContent = dialog[index]; return; }
     if (++index < dialog.length) line();
     else { open = false; panel.style.display = 'none'; }
@@ -157,7 +145,8 @@ function hit(kind = 'melee') {
         scene.remove(o.e);
         kills++;
         document.getElementById('kills').textContent = 'Opps: ' + kills + '/3';
-        if (kills === 3) say(['We got all the Opps, gang. Type shit.']);
+        niggy.react('laughing', 1.6);
+        if (kills === 3) { niggy.spin(); say(['We got all the Opps, gang. Type shit.']); }
       }
     }
   }
@@ -165,6 +154,8 @@ function hit(kind = 'melee') {
 function transform() {
   og = !og;
   toneda.transform(og);
+  niggy.react('surprised', 1.1);
+  niggy.spin();
   say([og ? 'From YN to OG! Type shit.' : 'Back to YN. Type shit.']);
 }
 function action(a) {
@@ -205,6 +196,7 @@ addEventListener('pointerup', () => drag = false);
 addEventListener('pointermove', e => { if (drag) { yaw += (e.clientX - px) * 0.006; px = e.clientX; } });
 
 // ---------- main loop ----------
+niggy.warpTo(new T.Vector3(1.1, toneda.spec.height - 0.2, 0.6));
 const clock = new T.Clock();
 const down = (...names) => names.some(n => keys.has(n));
 function frame() {
@@ -238,8 +230,7 @@ function frame() {
     player.position.y = jump;
 
     const h = toneda.spec.height;
-    demon.rotation.z = Math.sin(clock.elapsedTime * 8) * 0.14;
-    demon.position.set(player.position.x + 1.1, player.position.y + h - 0.2 + Math.sin(clock.elapsedTime * 4) * 0.15, player.position.z + 0.6);
+    niggyTarget.set(player.position.x + 1.1, player.position.y + h - 0.2, player.position.z + 0.6);
     const back = sprint ? 10 : 8;
     camera.position.lerp(new T.Vector3(player.position.x - Math.sin(yaw) * back, player.position.y + (sprint ? 5 : 4.5), player.position.z - Math.cos(yaw) * back), Math.min(1, dt * 6));
     camera.lookAt(player.position.x, player.position.y + h * 0.55, player.position.z);
@@ -249,6 +240,11 @@ function frame() {
   }
 
   toneda.update(dt, { moving, sprint, grounded: jump === 0, vy: velocity });
+
+  // Niggy: talks while his line types out, scowls when an Opp is close
+  niggy.speak(open && typing && speaker === 'NIGGY');
+  niggy.setExpression(enemies.some(o => o.hp > 0 && o.e.position.distanceTo(player.position) < 5.5) ? 'mad' : 'idle');
+  niggy.update(dt, active ? niggyTarget : null, camera);
   renderer.render(scene, camera);
 }
 frame();
@@ -259,4 +255,4 @@ addEventListener('resize', () => {
 });
 
 // Handy for debugging from the browser console.
-window.game = { toneda, player, enemies, scene };
+window.game = { toneda, niggy, player, enemies, scene };

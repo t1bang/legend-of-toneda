@@ -14,12 +14,13 @@
 </style>
 </head>
 <body>
-<div id="bar"><b>TONEDA MODEL VIEWER</b><span id="forms"></span><span id="clips"></span></div>
+<div id="bar"><b>TONEDA MODEL VIEWER</b><span id="forms"></span><span id="clips"></span><b style="margin-left:8px">NIGGY</b><span id="moods"></span></div>
 <div id="hint">Drag to rotate • scroll to zoom • pick a form and an animation above</div>
 <script type="module">
 import * as T from './vendor/three.module.min.js';
 import { ToneDa } from './src/character/toneda.js';
 import { ONE_SHOTS } from './src/character/anims.js';
+import { Niggy, EXPRESSIONS } from './src/character/niggy.js';
 
 const scene = new T.Scene();
 scene.background = new T.Color('#7cb5d6');
@@ -39,6 +40,9 @@ scene.add(ground);
 
 const toneda = new ToneDa();
 scene.add(toneda.root);
+const niggy = new Niggy();
+scene.add(niggy.root);
+const niggySpot = new T.Vector3();
 
 const view = { yaw: 0.5, pitch: 0.18, dist: 7.5, loop: 'idle', paused: false };
 const state = () => ({
@@ -75,6 +79,13 @@ function select(name) {
   buttons();
 }
 buttons();
+const moods = document.getElementById('moods');
+for (const name of [...EXPRESSIONS, 'spin']) {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.onclick = () => { if (name === 'spin') niggy.spin(); else { niggy.speak(name === 'talking'); niggy.setExpression(name === 'talking' ? 'idle' : name); } };
+  moods.append(b, ' ');
+}
 
 let drag = false, px = 0, py = 0;
 renderer.domElement.onpointerdown = e => { drag = true; px = e.clientX; py = e.clientY; };
@@ -93,12 +104,12 @@ function render() {
   camera.lookAt(0, h, 0);
   renderer.render(scene, camera);
 }
-function step(dt) { toneda.update(dt, state()); if (toneda.variant !== step.last) { step.last = toneda.variant; buttons(); } render(); }
+function step(dt) { toneda.update(dt, state()); niggySpot.set(1.5, toneda.spec.height - 0.3, 0.4); niggy.update(dt, niggySpot, camera); if (toneda.variant !== step.last) { step.last = toneda.variant; buttons(); } render(); }
 const clock = new T.Clock();
 (function frame() { requestAnimationFrame(frame); const dt = Math.min(clock.getDelta(), 0.05); if (!view.paused) step(dt); })();
 
 // Hooks for automated screenshots.
-window.viewer = { toneda, view, select, step, render };
+window.viewer = { toneda, niggy, view, select, step, render, camera, renderer, scene };
 </script>
 </body>
 </html>
