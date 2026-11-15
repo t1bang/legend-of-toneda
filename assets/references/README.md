@@ -19,3 +19,7 @@ Suggested names:
 Read this document and inspect the actual images in `assets/references/` once uploaded. The most recent shield revision supersedes the silver-edged shield in older references. Keep YN clean-shaven with short dreads, OG with long dreads and facial hair. Niggy is a glowing red ball with angry scribbled eyes, sharp teeth and two small black wings, no humanoid body.
 
 Use reference renders to produce rigged 3D assets; don't treat them as 2D sprites or completed GLB files. Rig characters and retarget reusable clips; only make custom animations for signature actions. Do not replace the live code-built models until `assets/models/yn-toneda.glb` and `og-toneda.glb` exist and load successfully.
+
+## Corrections from the creator (override the images)
+- **OG ToneDa has no tattoos.** The current `og-toneda-front.png`, `og-toneda-turnaround.png` and `views/og-toneda-*.png` show arm tattoos and must be regenerated with clean, bare arms before any 3D model is made from them.
+- **The round shield must carry the gold T1 logo** in its red center. `yn-toneda-shield-revision.png` is missing it.
