@@ -11,6 +11,7 @@ It is built in code, so there are no model files to download or lose.
 | `src/character/toneda.js` | Proportions for YN and OG, the model itself, the GlockNina prop, and the `ToneDa` controller |
 | `src/character/anims.js` | Every animation clip, written as bone poses |
 | `src/character/niggy.js` | Niggy: orb, bat wings, seven swappable faces, glow, flames, hover/flap/spin |
+| `src/world.js` | Trap Village: cliffs, trees, paths, Trap House, stilt huts, stump homes, Great Trap Tree, pond, stall, plus collision |
 | `viewer.html` | Model viewer: spin either form, play any clip, try Niggy's expressions |
 
 ## Clips

@@ -4,24 +4,19 @@
 import * as T from '../vendor/three.module.min.js';
 import { ToneDa } from './character/toneda.js';
 import { Niggy, EXPRESSIONS } from './character/niggy.js';
+import { buildWorld } from './world.js';
 
 // ---------- renderer, camera, lights ----------
 const scene = new T.Scene();
-scene.background = new T.Color('#7cb5d6');
-scene.fog = new T.Fog('#7cb5d6', 35, 85);
 const camera = new T.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 200);
 const renderer = new T.WebGLRenderer({ antialias: false });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.4));
 document.body.prepend(renderer.domElement);
-scene.add(new T.HemisphereLight(0xffffff, 0x455d40, 2.7));
-const sun = new T.DirectionalLight(0xffe2b2, 2);
-sun.position.set(12, 25, 9);
-scene.add(sun);
 
-// ---------- placeholder-shape helpers (the world and the Opps still use these) ----------
+// ---------- placeholder-shape helpers (the Opps still use these) ----------
 const mat = color => new T.MeshLambertMaterial({ color, flatShading: true });
-const brown = mat('#70472f'), leaf = mat('#34763b'), red = mat('#9e182b'), black = mat('#1a1b24');
+const brown = mat('#70472f'), leaf = mat('#34763b');
 function shape(geometry, material, x, y, z, parent = scene) {
   const mesh = new T.Mesh(geometry, material);
   mesh.position.set(x, y, z);
@@ -32,47 +27,15 @@ const cube = (w, h, d, m, x, y, z, parent) => shape(new T.BoxGeometry(w, h, d), 
 const ball = (r, m, x, y, z, parent) => shape(new T.SphereGeometry(r, 8, 6), m, x, y, z, parent);
 const trunk = (r, h, m, x, y, z, parent) => shape(new T.CylinderGeometry(r * 0.8, r, h, 8), m, x, y, z, parent);
 
-// ---------- Trap Village ----------
-const floor = shape(new T.PlaneGeometry(160, 160), mat('#568b44'), 0, 0, 0);
-floor.rotation.x = -Math.PI / 2;
-for (let i = 0; i < 65; i++) {
-  const a = i * 2.4, d = 15 + Math.sqrt(i) * 4, x = Math.cos(a) * d, z = Math.sin(a) * d;
-  trunk(0.45, 4, brown, x, 2, z);
-  ball(2.6, leaf, x, 5, z);
-}
-
-// The Trap House
-const house = new T.Group();
-house.position.set(-8, 0, -7);
-scene.add(house);
-for (const x of [-2, 2]) for (const z of [-2, 2]) trunk(0.3, 5, brown, x, 2.5, z, house);
-cube(6, 0.4, 6, brown, 0, 5, 0, house);
-cube(5, 3, 4, mat('#ad7949'), 0, 6.7, 0, house);
-const roof = shape(new T.ConeGeometry(4.2, 2.5, 4), red, 0, 9.3, 0, house);
-roof.rotation.y = Math.PI / 4;
-const sign = document.createElement('canvas');
-sign.width = 256; sign.height = 80;
-const signCtx = sign.getContext('2d');
-signCtx.fillStyle = '#ff2525';
-signCtx.font = 'bold 70px monospace';
-signCtx.fillText('TRAP', 25, 65);
-shape(new T.PlaneGeometry(3.5, 1), new T.MeshBasicMaterial({ map: new T.CanvasTexture(sign), transparent: true }), 0, 7, 2.05, house);
-
-// The Great Trap Tree
-const tree = new T.Group();
-tree.position.set(10, 0, -10);
-scene.add(tree);
-trunk(3, 13, brown, 0, 6.5, 0, tree);
-for (let i = 0; i < 6; i++) ball(4, leaf, Math.sin(i * 2.4) * 3, 13, Math.cos(i * 2.4) * 3, tree);
-ball(0.5, black, -0.9, 7, 2.5, tree);
-ball(0.5, black, 0.9, 7, 2.5, tree);
-cube(1.8, 0.25, 0.4, black, 0, 5.5, 2.7, tree);
+// ---------- Trap Village (see world.js) ----------
+const world = buildWorld(scene);
 
 // ---------- ToneDa (rigged model) ----------
 const player = new T.Group();
 scene.add(player);
 const toneda = new ToneDa();
 player.add(toneda.root);
+player.position.copy(world.spawn);
 
 // ---------- Niggy (demon companion) ----------
 const niggy = new Niggy({ faces: Object.fromEntries(EXPRESSIONS.map(n => [n, `assets/niggy/niggy-face-${n}.png`])) });
@@ -125,7 +88,7 @@ function talk() {
     else { open = false; panel.style.display = 'none'; }
     return;
   }
-  if (player.position.distanceTo(tree.position) < 8) {
+  if (player.position.distanceTo(world.treePos) < 9) {
     say(['Young ToneDa, the rhythm of time is missing.', 'Defeat the Opps and protect Trap Village.'], 'GREAT TRAP TREE');
   } else say(NIGGY_INTRO);
 }
@@ -195,8 +158,11 @@ renderer.domElement.onpointerdown = e => { drag = true; px = e.clientX; };
 addEventListener('pointerup', () => drag = false);
 addEventListener('pointermove', e => { if (drag) { yaw += (e.clientX - px) * 0.006; px = e.clientX; } });
 
+// Handy for debugging from the browser console.
+window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null };
+
 // ---------- main loop ----------
-niggy.warpTo(new T.Vector3(1.1, toneda.spec.height - 0.2, 0.6));
+niggy.warpTo(new T.Vector3(world.spawn.x + 1.1, toneda.spec.height - 0.2, world.spawn.z + 0.6));
 const clock = new T.Clock();
 const down = (...names) => names.some(n => keys.has(n));
 function frame() {
@@ -220,6 +186,7 @@ function frame() {
         facing = a;
       }
     }
+    world.resolve(player.position);
     // turn smoothly toward the direction of travel
     const turn = Math.atan2(Math.sin(facing - player.rotation.y), Math.cos(facing - player.rotation.y));
     player.rotation.y += turn * Math.min(1, dt * 16);
@@ -235,16 +202,22 @@ function frame() {
     camera.position.lerp(new T.Vector3(player.position.x - Math.sin(yaw) * back, player.position.y + (sprint ? 5 : 4.5), player.position.z - Math.cos(yaw) * back), Math.min(1, dt * 6));
     camera.lookAt(player.position.x, player.position.y + h * 0.55, player.position.z);
   } else {
-    camera.position.set(16, 12, 18);
-    camera.lookAt(0, 3, 0);
+    const t = clock.elapsedTime * 0.08;           // slow fly-around behind the title screen
+    camera.position.set(Math.cos(t) * 24, 12, Math.sin(t) * 24);
+    camera.lookAt(0, 4, -2);
   }
 
+  if (window.game.cam) {                          // debug: window.game.cam = [x, y, z, lookX, lookY, lookZ]
+    camera.position.set(...window.game.cam.slice(0, 3));
+    camera.lookAt(...window.game.cam.slice(3));
+  }
   toneda.update(dt, { moving, sprint, grounded: jump === 0, vy: velocity });
 
   // Niggy: talks while his line types out, scowls when an Opp is close
   niggy.speak(open && typing && speaker === 'NIGGY');
   niggy.setExpression(enemies.some(o => o.hp > 0 && o.e.position.distanceTo(player.position) < 5.5) ? 'mad' : 'idle');
   niggy.update(dt, active ? niggyTarget : null, camera);
+  world.update(dt);
   renderer.render(scene, camera);
 }
 frame();
@@ -254,5 +227,3 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// Handy for debugging from the browser console.
-window.game = { toneda, niggy, player, enemies, scene };
