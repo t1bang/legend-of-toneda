@@ -3,7 +3,7 @@
 // unpacked into readable code. The hero is now the rigged model in ./character/.
 import * as T from '../vendor/three.module.min.js';
 import { ToneDa } from './character/toneda.js';
-import { Niggy } from './character/niggy.js';
+import { Niggy, EXPRESSIONS } from './character/niggy.js';
 
 // ---------- renderer, camera, lights ----------
 const scene = new T.Scene();
@@ -75,7 +75,7 @@ const toneda = new ToneDa();
 player.add(toneda.root);
 
 // ---------- Niggy (demon companion) ----------
-const niggy = new Niggy();
+const niggy = new Niggy({ faces: Object.fromEntries(EXPRESSIONS.map(n => [n, `assets/niggy/niggy-face-${n}.png`])) });
 scene.add(niggy.root);
 const niggyTarget = new T.Vector3();
 

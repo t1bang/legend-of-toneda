@@ -19,10 +19,8 @@ idle, walk, run, sprint, jump, fall, land, roll, punchR, punchL, kick, fire, blo
 `block`, `walk`, `hurt` and `song` exist and play in the viewer but are not wired to gameplay yet.
 
 ## Niggy
-Faces are drawn in code. To use painted ones, put 512x512 transparent PNGs in `assets/niggy/` and pass them in:
-```js
-new Niggy({ faces: { idle: 'assets/niggy/niggy-face-idle.png', talking: 'assets/niggy/niggy-face-talking.png' } });
-```
+His seven faces are the creator's own art, cut from the faces sheet into 512x512 transparent PNGs in `assets/niggy/`.
+If one fails to load, a simpler code-drawn face is used instead.
 Expressions: idle, talking, laughing, mad, surprised, confused, hurt.
 
 ## Using it
