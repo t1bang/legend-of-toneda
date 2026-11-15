@@ -30,3 +30,4 @@ Use reference renders to produce rigged 3D assets; don't treat them as 2D sprite
 - **Shield only:** `yn-toneda-shield-revision.png`. Do not copy that image's face, hair, cape, or satchel; they differ from the YN turnaround.
 - `og-toneda-front.png` is drawn in a realistic style with no elf ears, so it does not match the turnaround. Do not build the model from it.
 - Use the plain brown satchel from the turnarounds, not the patterned ones.
+- **Niggy:** `niggy-character-sheet.png` is the authority (turnaround, seven expressions, float/flap/dash/spin motions, palette #FF0000 / #8B0000 / #000000 / #FFFFFF, additive glow). It replaces `niggy-turnaround.png`.
