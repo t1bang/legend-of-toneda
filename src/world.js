@@ -133,8 +133,10 @@ function signTexture(text, { w = 256, h = 80, color = '#ff2525', font = 'bold 64
 
 export function buildWorld(scene) {
   const X = textures(), r = rng(2026);
-  const colliders = [];                         // { x, z, r } circles the player cannot enter
-  const block = (x, z, radius) => colliders.push({ x, z, r: radius });
+  const colliders = [];                         // circles (and a few boxes) the player cannot enter
+  const block = (x, z, radius, yMin = -Infinity, yMax = Infinity) => colliders.push({ x, z, r: radius, yMin, yMax });
+  const surfaces = [];                          // things you can stand on above the ground
+  const ladders = [];                           // { x, z, face, top, exit: [x, z] }
   const lam = (map, color = '#ffffff', extra = {}) => new T.MeshLambertMaterial({ map, color, ...extra });
   const flat = color => new T.MeshLambertMaterial({ color, flatShading: true });
   const M = {
@@ -252,7 +254,8 @@ export function buildWorld(scene) {
   }
 
   // ---------- reusable village pieces ----------
-  function ladder(x, z, height, rotY, parent = scene) {
+  function ladder(x, z, height, rotY, parent = scene, climb = null) {
+    if (climb) ladders.push(climb);
     const g = new T.Group();
     g.position.set(x, 0, z); g.rotation.y = rotY;
     parent.add(g);
@@ -264,6 +267,7 @@ export function buildWorld(scene) {
     const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz), ang = Math.atan2(dx, dz), n = Math.round(len / 0.75);
     for (let i = 0; i <= n; i++) {
       const t = i / n, sag = Math.sin(t * Math.PI) * 0.7;
+      if (i === 0) surfaces.push({ type: 'bridge', a, b, y: y + 0.05, sag: 0.7, half: 0.8 });
       const plank = box(1.5, 0.1, 0.55, M.planks, a[0] + dx * t, y - sag, a[1] + dz * t);
       plank.rotation.y = ang;
       if (i % 2 === 0) for (const side of [-0.75, 0.75]) {
@@ -318,7 +322,9 @@ export function buildWorld(scene) {
     box(0.9, 1.4, 0.1, M.dark, 0, y + 0.95, 2.0, g);
     const c = add(canopyGeo, M.leaves, 0, y + 9, 0, g);
     c.scale.set(5.5, 3.8, 5.5);
-    block(x, z, 1.7);
+    block(x, z, 1.7, -Infinity, y - 0.5);        // the trunk below
+    block(x, z, 2.2, y - 0.5);                   // the hut itself, up on the platform
+    surfaces.push({ type: 'disc', x, z, r: 3.2, y: y + 0.15 });
     return g;
   }
 
@@ -326,7 +332,7 @@ export function buildWorld(scene) {
   const house = new T.Group();
   house.position.set(-8, 0, -7);
   scene.add(house);
-  for (const x of [-2.6, 2.6]) for (const z of [-2.6, 2.6]) { cyl(0.32, 0.4, 5, M.bark, x, 2.5, z, house, 7); block(-8 + x, -7 + z, 0.6); }
+  for (const x of [-2.6, 2.6]) for (const z of [-2.6, 2.6]) { cyl(0.32, 0.4, 5, M.bark, x, 2.5, z, house, 7); block(-8 + x, -7 + z, 0.6, -Infinity, 4.5); }
   box(7, 0.4, 7, M.planks, 0, 5, 0, house);
   for (let i = -3; i <= 3; i++) for (const [x, z, front] of [[i * 1.1, -3.35, false], [-3.35, i * 1.1, false], [3.35, i * 1.1, false], [i * 1.1, 3.35, true]]) {
     if (front && Math.abs(i) < 1) continue;                               // gap at the top of the ladder
@@ -347,7 +353,9 @@ export function buildWorld(scene) {
   box(1.1, 1.9, 0.1, M.dark, 0, 6.15, 1.52, house);                       // door
   const trapSign = add(new T.PlaneGeometry(4.4, 1.4), new T.MeshBasicMaterial({ map: signTexture('TRAP', { color: '#ff1f1f', outline: '#3a0508' }), transparent: true }), 0, 7.7, 1.53, house);
   trapSign.renderOrder = 1;
-  ladder(0, 3.9, 5.2, Math.PI, house);
+  ladder(0, 3.9, 5.2, Math.PI, house, { x: -8, z: -2.75, face: Math.PI, top: 5.2, exit: [-8, -4.5] });
+  surfaces.push({ type: 'rect', x0: -11.5, x1: -4.5, z0: -10.5, z1: -3.5, y: 5.2 });
+  colliders.push({ box: true, x0: -10.5, x1: -5.5, z0: -9.5, z1: -5.5, yMin: 4.5, yMax: Infinity });   // the cabin
   lantern(-2.2, 7.2, 1.7, house);
 
   // ---------- stilt huts and rope bridges ----------
@@ -356,7 +364,7 @@ export function buildWorld(scene) {
   stiltHut(-10, -22, 5, greenRoof);
   ropeBridge([-18.3, -18.2], [-12.9, -20.8], 5.1);
   ropeBridge([-9.6, -18.9], [-8.4, -10.5], 5.1);
-  ladder(-21, -13.7, 5.1, Math.PI);
+  ladder(-21, -13.7, 5.1, Math.PI, scene, { x: -21, z: -13.35, face: Math.PI, top: 5.15, exit: [-21, -15] });
 
   // ---------- stump homes ----------
   stumpHome(-19, 6, Math.atan2(1 + 19, 1 - 6), strawRoof);
@@ -468,7 +476,7 @@ export function buildWorld(scene) {
   hole.rotation.y = -Math.PI / 2;
 
   // ---------- scattered grass tufts, flowers and rocks ----------
-  const clear = (x, z) => colliders.every(c => Math.hypot(c.x - x, c.z - z) > c.r + 0.4) && Math.hypot(x - pond.x, z - pond.z) > pond.r + 0.3;
+  const clear = (x, z) => colliders.every(c => c.box || Math.hypot(c.x - x, c.z - z) > c.r + 0.4) && Math.hypot(x - pond.x, z - pond.z) > pond.r + 0.3;
   function scatter(count, map, w, h) {
     const quad = new T.PlaneGeometry(w, h); quad.translate(0, h / 2, 0);
     const other = quad.clone(); other.rotateY(Math.PI / 2);
@@ -516,6 +524,15 @@ export function buildWorld(scene) {
   flies.frustumCulled = false;
   scene.add(flies);
 
+  // Solid meshes the camera should not pass through (flat decals and the ground are skipped).
+  const solids = [];
+  scene.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh || ['PlaneGeometry', 'CircleGeometry', 'RingGeometry', 'ShapeGeometry', 'BufferGeometry'].includes(o.geometry.type)) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    // posts, rails, planks and ropes are too thin to bother the camera
+    if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) > 1.2) solids.push(o);
+  });
+
   let time = 0;
   function update(dt) {
     time += dt;
@@ -529,9 +546,17 @@ export function buildWorld(scene) {
     flyGeo.attributes.position.needsUpdate = true;
   }
 
-  // Push a point out of every obstacle and keep it inside the village.
+  // Push a point out of every obstacle at its height and keep it inside the village.
   function resolve(pos, radius = 0.45) {
     for (const c of colliders) {
+      if (pos.y < c.yMin || pos.y > c.yMax) continue;
+      if (c.box) {
+        const x0 = c.x0 - radius, x1 = c.x1 + radius, z0 = c.z0 - radius, z1 = c.z1 + radius;
+        if (pos.x <= x0 || pos.x >= x1 || pos.z <= z0 || pos.z >= z1) continue;
+        const out = [[pos.x - x0, 'x', x0], [x1 - pos.x, 'x', x1], [pos.z - z0, 'z', z0], [z1 - pos.z, 'z', z1]].sort((p, q) => p[0] - q[0])[0];
+        pos[out[1]] = out[2];
+        continue;
+      }
       const dx = pos.x - c.x, dz = pos.z - c.z, d = Math.hypot(dx, dz), min = c.r + radius;
       if (d < min && d > 1e-4) { pos.x = c.x + dx / d * min; pos.z = c.z + dz / d * min; }
     }
@@ -539,5 +564,22 @@ export function buildWorld(scene) {
     if (d > max) { pos.x *= max / d; pos.z *= max / d; }
   }
 
-  return { update, resolve, colliders, radius: RADIUS, treePos: new T.Vector3(10, 0, -10), spawn: new T.Vector3(1, 0, 1) };
+  // Height of the floor under a point: the highest surface that is not above knee height.
+  function groundAt(x, z, y) {
+    let best = 0;
+    for (const f of surfaces) {
+      let h = null;
+      if (f.type === 'rect') { if (x >= f.x0 && x <= f.x1 && z >= f.z0 && z <= f.z1) h = f.y; }
+      else if (f.type === 'disc') { if (Math.hypot(x - f.x, z - f.z) <= f.r) h = f.y; }
+      else {
+        const dx = f.b[0] - f.a[0], dz = f.b[1] - f.a[1], len2 = dx * dx + dz * dz;
+        const t = ((x - f.a[0]) * dx + (z - f.a[1]) * dz) / len2;
+        if (t >= 0 && t <= 1 && Math.hypot(x - (f.a[0] + dx * t), z - (f.a[1] + dz * t)) <= f.half) h = f.y - Math.sin(t * Math.PI) * f.sag;
+      }
+      if (h !== null && h <= y + 0.6 && h > best) best = h;
+    }
+    return best;
+  }
+
+  return { update, resolve, groundAt, ladders, surfaces, solids, colliders, radius: RADIUS, treePos: new T.Vector3(10, 0, -10), spawn: new T.Vector3(1, 0, 1) };
 }

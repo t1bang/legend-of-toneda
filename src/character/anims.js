@@ -199,5 +199,11 @@ export function makeClips(s) {
     [1.6, merge(So, { chest: [0.05, 0.12, 0], hips: [0, 0, 0.04] })],
   ]);
 
+  // climbing a ladder: opposite arm and leg reach up together
+  const Cl = { spine: [0.1, 0, 0], head: [-0.25, 0, 0],
+    armL: [-2.5, 0, 0.1], foreL: [-0.5, 0, 0], armR: [-1.3, 0, -0.1], foreR: [-1.5, 0, 0],
+    legL: [-0.2, 0, 0.05], shinL: [0.4, 0, 0], footL: [-0.2, 0, 0], legR: [-1.1, 0, -0.05], shinR: [1.5, 0, 0], footR: [-0.4, 0, 0] };
+  add('climb', [[0, Cl], [0.35, mirror(Cl)], [0.7, Cl]]);
+
   return clips;
 }

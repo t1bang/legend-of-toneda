@@ -56,8 +56,8 @@ for (let i = 0; i < 3; i++) {
 
 // ---------- game state ----------
 const keys = new Set();
-let active = false, og = false, jump = 0, velocity = 0, yaw = 0, facing = 0;
-let attackCooldown = 0, rollTime = 0, combo = 0, kills = 0;
+let active = false, og = false, velocity = 0, grounded = true, climbing = null, yaw = 0, facing = 0;
+let attackCooldown = 0, rollTime = 0, ladderWait = 0, grab = null, inputLock = false, combo = 0, kills = 0;
 let dialog = [], index = 0, open = false, timer, speaker = '', typing = false;
 const panel = document.getElementById('box'), words = document.getElementById('words');
 
@@ -95,7 +95,7 @@ function talk() {
 
 // ---------- actions ----------
 function hit(kind = 'melee') {
-  if (attackCooldown > 0 || open) return;
+  if (attackCooldown > 0 || open || climbing) return;
   attackCooldown = 0.43;
   if (kind === 'fire') toneda.play('fire');
   else {
@@ -125,8 +125,9 @@ function action(a) {
   if (a === 'talk') talk();
   if (a === 'hit') hit('melee');
   if (a === 'fire') hit('fire');
-  if (a === 'jump' && jump === 0) velocity = 7;
-  if (a === 'roll' && rollTime <= 0 && !open) { rollTime = 0.6; toneda.play('roll'); }
+  if (a === 'jump' && climbing) { climbing = null; toneda.release(); velocity = 0; }   // let go of the ladder
+  else if (a === 'jump' && grounded) { velocity = 7; grounded = false; }
+  if (a === 'roll' && rollTime <= 0 && !open && !climbing) { rollTime = 0.6; toneda.play('roll'); }
 }
 
 // ---------- input ----------
@@ -159,10 +160,11 @@ addEventListener('pointerup', () => drag = false);
 addEventListener('pointermove', e => { if (drag) { yaw += (e.clientX - px) * 0.006; px = e.clientX; } });
 
 // Handy for debugging from the browser console.
-window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null };
+window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null, get climbing() { return climbing; }, get grounded() { return grounded; } };
 
 // ---------- main loop ----------
 niggy.warpTo(new T.Vector3(world.spawn.x + 1.1, toneda.spec.height - 0.2, world.spawn.z + 0.6));
+const camFrom = new T.Vector3(), camWant = new T.Vector3(), camDir = new T.Vector3(), camRay = new T.Raycaster();
 const clock = new T.Clock();
 const down = (...names) => names.some(n => keys.has(n));
 function frame() {
@@ -170,36 +172,82 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   attackCooldown = Math.max(0, attackCooldown - dt);
   rollTime = Math.max(0, rollTime - dt);
+  ladderWait = Math.max(0, ladderWait - dt);
   const sprint = keys.has('shift');
   let moving = false;
 
   if (active) {
-    if (!open) {
-      const x = Number(down('d', 'arrowright')) - Number(down('a', 'arrowleft'));
-      const z = Number(down('s', 'arrowdown')) - Number(down('w', 'arrowup'));
-      if (x || z) {
+    let ix = open ? 0 : Number(down('d', 'arrowright')) - Number(down('a', 'arrowleft'));
+    let iz = open ? 0 : Number(down('s', 'arrowdown')) - Number(down('w', 'arrowup'));
+    // after stepping off a ladder, wait for the keys to be let go so he does not walk straight back off
+    if (inputLock) { if (ix || iz) ix = iz = 0; else inputLock = false; }
+    const pos = player.position;
+
+    if (climbing) {
+      // on a ladder: forward goes up, back goes down
+      const L = climbing;
+      // Keep going the way he grabbed on for as long as the same keys are held (the camera
+      // swings round during the climb, so their meaning would flip). After that: W up, S down.
+      let dir;
+      if (grab && grab.keys === ix + ',' + iz) dir = grab.dir;
+      else { grab = null; dir = -iz; }
+      pos.x = L.x; pos.z = L.z; facing = L.face;
+      pos.y += dir * 2.6 * dt;
+      toneda.model.actions.climb.timeScale = dir;
+      if (pos.y >= L.top) { pos.set(L.exit[0], L.top, L.exit[1]); climbing = null; ladderWait = 0.7; inputLock = true; toneda.release(); }
+      else if (pos.y <= 0) { pos.y = 0; climbing = null; ladderWait = 0.5; inputLock = true; toneda.release(); }
+      velocity = 0; grounded = true;
+    } else {
+      if (ix || iz) {
         moving = true;
         // W runs away from the camera, D goes screen-right (the first prototype had both reversed)
-        const a = Math.atan2(-x, -z) + yaw, speed = rollTime > 0 ? 12 : (sprint ? 9.5 : 5.5);
-        player.position.x += Math.sin(a) * dt * speed;
-        player.position.z += Math.cos(a) * dt * speed;
+        const a = Math.atan2(-ix, -iz) + yaw, speed = rollTime > 0 ? 12 : (sprint ? 9.5 : 5.5);
+        pos.x += Math.sin(a) * dt * speed;
+        pos.z += Math.cos(a) * dt * speed;
         facing = a;
+        // grab a ladder: walk into its foot, or walk back onto it from the platform above
+        if (grounded && rollTime <= 0 && ladderWait <= 0) for (const L of world.ladders) {
+          const toward = Math.sin(a) * Math.sin(L.face) + Math.cos(a) * Math.cos(L.face);
+          const atFoot = pos.y < 0.5 && Math.hypot(pos.x - L.x, pos.z - L.z) < 0.9 && toward > 0.4;
+          const atTop = Math.abs(pos.y - L.top) < 0.3 && Math.hypot(pos.x - L.exit[0], pos.z - L.exit[1]) < 1.0 && toward < -0.4;
+          if (atFoot || atTop) {
+            climbing = L; moving = false;
+            grab = { keys: ix + ',' + iz, dir: atTop ? -1 : 1 };
+            pos.set(L.x, atTop ? L.top - 0.15 : 0.05, L.z);
+            toneda.hold('climb');
+            break;
+          }
+        }
+      }
+      if (!climbing) {
+        world.resolve(pos);
+        const floor = world.groundAt(pos.x, pos.z, pos.y);
+        velocity -= 18 * dt;
+        pos.y += velocity * dt;
+        // land, or stay glued to the floor on gentle slopes like the bridges
+        if (pos.y <= floor || (grounded && velocity <= 0 && pos.y - floor < 0.35)) { pos.y = floor; velocity = 0; grounded = true; }
+        else grounded = false;
       }
     }
-    world.resolve(player.position);
     // turn smoothly toward the direction of travel
     const turn = Math.atan2(Math.sin(facing - player.rotation.y), Math.cos(facing - player.rotation.y));
     player.rotation.y += turn * Math.min(1, dt * 16);
 
-    velocity -= 18 * dt;
-    jump = Math.max(0, jump + velocity * dt);
-    if (jump === 0) velocity = 0;
-    player.position.y = jump;
-
     const h = toneda.spec.height;
     niggyTarget.set(player.position.x + 1.1, player.position.y + h - 0.2, player.position.z + 0.6);
+    // while climbing, swing the camera round behind him so it looks at the ladder
+    if (climbing) yaw += Math.atan2(Math.sin(climbing.face - yaw), Math.cos(climbing.face - yaw)) * Math.min(1, dt * 4);
     const back = sprint ? 10 : 8;
-    camera.position.lerp(new T.Vector3(player.position.x - Math.sin(yaw) * back, player.position.y + (sprint ? 5 : 4.5), player.position.z - Math.cos(yaw) * back), Math.min(1, dt * 6));
+    camFrom.set(player.position.x, player.position.y + h * 0.75, player.position.z);
+    camWant.set(player.position.x - Math.sin(yaw) * back, player.position.y + (sprint ? 5 : 4.5), player.position.z - Math.cos(yaw) * back);
+    // pull the camera in when a wall, trunk or roof is in the way
+    camDir.copy(camWant).sub(camFrom);
+    const reach = camDir.length();
+    camRay.set(camFrom, camDir.normalize());
+    camRay.far = reach;
+    const hit = camRay.intersectObjects(world.solids, false)[0];
+    if (hit) camWant.copy(camFrom).addScaledVector(camDir, Math.max(1.0, hit.distance - 0.5));
+    camera.position.lerp(camWant, Math.min(1, dt * (hit ? 14 : 6)));
     camera.lookAt(player.position.x, player.position.y + h * 0.55, player.position.z);
   } else {
     const t = clock.elapsedTime * 0.08;           // slow fly-around behind the title screen
@@ -211,7 +259,7 @@ function frame() {
     camera.position.set(...window.game.cam.slice(0, 3));
     camera.lookAt(...window.game.cam.slice(3));
   }
-  toneda.update(dt, { moving, sprint, grounded: jump === 0, vy: velocity });
+  toneda.update(dt, { moving, sprint, grounded, vy: velocity });
 
   // Niggy: talks while his line types out, scowls when an Opp is close
   niggy.speak(open && typing && speaker === 'NIGGY');
