@@ -21,5 +21,12 @@ Read this document and inspect the actual images in `assets/references/` once up
 Use reference renders to produce rigged 3D assets; don't treat them as 2D sprites or completed GLB files. Rig characters and retarget reusable clips; only make custom animations for signature actions. Do not replace the live code-built models until `assets/models/yn-toneda.glb` and `og-toneda.glb` exist and load successfully.
 
 ## Corrections from the creator (override the images)
-- **OG ToneDa has no tattoos.** The current `og-toneda-front.png`, `og-toneda-turnaround.png` and `views/og-toneda-*.png` show arm tattoos and must be regenerated with clean, bare arms before any 3D model is made from them.
-- **The round shield must carry the gold T1 logo** in its red center. `yn-toneda-shield-revision.png` is missing it.
+- **OG ToneDa has no tattoos.** Fixed in the current OG images.
+- **The round shield carries the gold T1 logo** in its red center, with a black rim. Fixed in `yn-toneda-shield-revision.png`.
+
+## Which image is the authority
+- **YN body, face, outfit:** `yn-toneda-turnaround.png` (split views in `views/`).
+- **OG body, face, outfit:** `og-toneda-turnaround.png` (split views in `views/`).
+- **Shield only:** `yn-toneda-shield-revision.png`. Do not copy that image's face, hair, cape, or satchel; they differ from the YN turnaround.
+- `og-toneda-front.png` is drawn in a realistic style with no elf ears, so it does not match the turnaround. Do not build the model from it.
+- Use the plain brown satchel from the turnarounds, not the patterned ones.
