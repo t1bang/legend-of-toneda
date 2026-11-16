@@ -6,6 +6,7 @@ import * as T from '../../vendor/three.module.min.js';
 import { MeshKit, buildSkeleton } from './meshkit.js';
 import { makeAtlas, UV } from './textures.js';
 import { makeClips, ONE_SHOTS } from './anims.js';
+import { loadArtVariant, loadShield } from './art.js';
 
 const PAL = {
   skin: '#a85c2c', skinDark: '#7d441f', red: '#b3182c', redDark: '#7a0f1f', black: '#17171d', grey: '#30313b',
@@ -350,7 +351,7 @@ export class ToneDa {
     for (const m of Object.values(this.models)) {
       this.root.add(m.mesh);
       m.mesh.visible = false;
-      m.mixer.addEventListener('finished', e => { if (m === this.model && e.action === m.current) this.busy = false; });
+      this._listen(m);
     }
     this.variant = 'yn';
     this.busy = false;      // true while a one-shot (attack, roll, ...) is playing
@@ -360,6 +361,38 @@ export class ToneDa {
     this.sway = { cape: 0, speed: 0 };
     this.model.mesh.visible = true;
     this._fade('idle', 0);
+  }
+
+  _listen(m) {
+    m.mixer.addEventListener('finished', e => { if (m === this.model && e.action === m.current) this.busy = false; });
+  }
+
+  // Swap one form's model for another (used when an art-built .glb finishes loading).
+  adopt(name, variant) {
+    const old = this.models[name], showing = this.variant === name;
+    old.mixer.stopAllAction();
+    this.root.remove(old.mesh);
+    this.models[name] = variant;
+    this.root.add(variant.mesh);
+    variant.mesh.visible = showing;
+    this._listen(variant);
+    if (showing) { this.busy = false; this._fade(this.held || this.loco, 0); }
+  }
+
+  // Load the models built from the approved artwork. Any form whose file is missing or
+  // broken keeps its code-built stand-in. Returns the names that loaded.
+  async loadArt(base = 'assets/models/') {
+    const loaded = [];
+    let shield = null;
+    try { shield = await loadShield(base + 't1-circular-shield.glb'); } catch (e) { console.warn('Shield model not loaded:', e.message); }
+    for (const name of ['yn', 'og']) {
+      try {
+        const v = await loadArtVariant(name, base + name + '-toneda.glb', { shield, gunGeometry: buildGlockNina(name === 'og' ? 1.45 : 1.15), gunMaterial: material() });
+        this.adopt(name, v);
+        loaded.push(name);
+      } catch (e) { console.warn('Art model for ' + name + ' not loaded, keeping the stand-in:', e.message); }
+    }
+    return loaded;
   }
 
   get model() { return this.models[this.variant]; }

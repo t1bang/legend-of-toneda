@@ -40,6 +40,8 @@ scene.add(ground);
 
 const toneda = new ToneDa();
 scene.add(toneda.root);
+toneda.root.visible = false;
+window.artLoaded = toneda.loadArt().then(names => { buttons(); return names; }).finally(() => { toneda.root.visible = true; });
 const niggy = new Niggy({ faces: Object.fromEntries(EXPRESSIONS.map(n => [n, `assets/niggy/niggy-face-${n}.png`])) });
 scene.add(niggy.root);
 const niggySpot = new T.Vector3();

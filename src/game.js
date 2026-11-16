@@ -35,6 +35,9 @@ const player = new T.Group();
 scene.add(player);
 const toneda = new ToneDa();
 player.add(toneda.root);
+// Show him only once the art-built models have arrived (or failed, leaving the code-built stand-in).
+toneda.root.visible = false;
+toneda.loadArt().finally(() => { toneda.root.visible = true; });
 player.position.copy(world.spawn);
 
 // ---------- Niggy (demon companion) ----------
