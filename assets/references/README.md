@@ -31,3 +31,4 @@ Use reference renders to produce rigged 3D assets; don't treat them as 2D sprite
 - `og-toneda-front.png` is drawn in a realistic style with no elf ears, so it does not match the turnaround. Do not build the model from it.
 - Use the plain brown satchel from the turnarounds, not the patterned ones.
 - **Niggy:** `niggy-character-sheet.png` is the authority (turnaround, seven expressions, float/flap/dash/spin motions, palette #FF0000 / #8B0000 / #000000 / #FFFFFF, additive glow). It replaces `niggy-turnaround.png`.
+- **YN ToneDa (final, approved 2026-11-16):** `yn-toneda-turnaround.png` and `views/yn-toneda-front|side|back.png` were replaced with the creator's approved high-detail turnaround. Build the YN model to this exact look. The round shield in it is strapped to his left arm.
