@@ -7,6 +7,7 @@ import { Niggy, EXPRESSIONS } from './character/niggy.js';
 import { buildWorld } from './world.js';
 import { Items } from './items.js';
 import { makeStick } from './touch.js';
+import { makeAudio } from './audio.js';
 
 // ---------- renderer, camera, lights ----------
 const scene = new T.Scene();
@@ -42,6 +43,9 @@ const cube = (w, h, d, m, x, y, z, parent) => shape(new T.BoxGeometry(w, h, d), 
 const ball = (r, m, x, y, z, parent) => shape(new T.SphereGeometry(r, 8, 6), m, x, y, z, parent);
 const trunk = (r, h, m, x, y, z, parent) => shape(new T.CylinderGeometry(r * 0.8, r, h, 8), m, x, y, z, parent);
 
+// ---------- sound (see audio.js) ----------
+const audio = makeAudio();
+
 // ---------- Trap Village (see world.js) ----------
 const world = buildWorld(scene);
 
@@ -74,25 +78,26 @@ for (let i = 0; i < 3; i++) {
 
 // ---------- game state ----------
 const keys = new Set();
-const touch = matchMedia('(pointer: coarse)').matches, USE = touch ? 'USE' : 'E';
+const touch = matchMedia('(pointer: coarse)').matches;
 let active = false, og = false, velocity = 0, grounded = true, climbing = null, yaw = 0, facing = 0;
 let attackCooldown = 0, rollTime = 0, ladderWait = 0, grab = null, inputLock = false, combo = 0, kills = 0;
 let dialog = [], index = 0, open = false, timer, speaker = '', typing = false, after = null;
-let quest = 'switch', rings = 0, carrying = null, snapCamera = false;
+let quest = 'switch', rings = 0, carrying = null, snapCamera = false, saidAt = 0, stride = 0, rungs = 0;
 const gear = { vest: false, switch: false };
 const panel = document.getElementById('box'), words = document.getElementById('words'), prompt = document.getElementById('prompt');
-document.getElementById('next').textContent = touch ? 'Tap here to continue' : 'Press E to continue';
+document.getElementById('next').textContent = touch ? 'Tap anywhere to continue' : 'Click anywhere or press E to continue';
 
 // ---------- quest and HUD ----------
 const QUESTS = {
   switch: 'Find the Switch somewhere in the village',
-  tree: 'Speak to the Great Trap Tree',
+  tree: 'Find the Great Trap Tree in his hidden grove',
   opps: 'Defeat the Opps in the training clearing',
   done: 'Trap Village is safe. More to come',
 };
 function setQuest(q) {
   quest = q;
   document.getElementById('quest').textContent = 'QUEST: ' + QUESTS[q];
+  audio.play(q === 'done' ? 'win' : 'quest');
 }
 function hud() {
   document.getElementById('armor').textContent = gear.vest ? ' ◆ ◆' : '';
@@ -104,10 +109,14 @@ function hud() {
 
 // ---------- dialogue ----------
 // then: something to do once the last line has been read
+const BLIP = { NIGGY: 'blipNiggy', 'GREAT TRAP TREE': 'blipTree' };
 function say(lines, who = 'NIGGY', then = null) {
   dialog = lines; index = 0; open = true; speaker = who; after = then;
+  saidAt = performance.now();
   panel.style.display = 'block';
   document.getElementById('who').textContent = who;
+  // Niggy's call for attention: his recorded voice if there is one, a chime if not
+  if (lines[0] === NIGGY_INTRO[0] && !audio.voice('niggy.listen')) audio.play('listen');
   line();
 }
 function line() {
@@ -117,6 +126,7 @@ function line() {
   typing = true;
   timer = setInterval(() => {
     words.textContent = dialog[index].slice(0, ++n);
+    if (n % 3 === 1 && dialog[index][n - 1] !== ' ') audio.play(BLIP[speaker] || 'blipItem');   // the patter of the words
     if (n >= dialog[index].length) { clearInterval(timer); typing = false; }
   }, 25);
 }
@@ -124,6 +134,7 @@ function advance() {
   clearInterval(timer);
   typing = false;
   if (words.textContent.length < dialog[index].length) { words.textContent = dialog[index]; return; }
+  audio.play('next');
   if (++index < dialog.length) { line(); return; }
   open = false; panel.style.display = 'none';
   const next = after;
@@ -139,7 +150,7 @@ const NIGGY_INTRO = [
 // What Niggy says when there is nothing else to use: a nudge toward the current mission.
 const NUDGE = {
   switch: ['Your Switch ain’t gon’ find itself. Check them stump houses round the village. Type shit.'],
-  tree: ['You strapped now. Go holla at the Great Trap Tree. Type shit.'],
+  tree: ['You strapped now. The Great Trap Tree stay hid in his grove. Take the path past the market stall and slide through them rocks. Type shit.'],
   opps: ['Them Opps posted up in the training clearing. Handle that. Type shit.'],
   done: ['We got all the Opps, gang. Type shit.'],
 };
@@ -154,6 +165,7 @@ function treeTalk() {
 
 // ---------- things to use: the flower pot, the chests ----------
 const items = new Items(scene, world);
+items.sound = name => audio.play(name);
 items.addPot(world.spots.pot.pos);
 items.addChest(world.spots.vestChest.pos, world.spots.vestChest.rotY, {
   name: 'BULLETPROOF VEST', model: 'vest',
@@ -163,7 +175,10 @@ items.addChest(world.spots.vestChest.pos, world.spots.vestChest.rotY, {
 items.addChest(world.spots.switchChest.pos, world.spots.switchChest.rotY, {
   name: 'THE SWITCH', model: switchModel(),
   lines: ['You found the Switch!', touch ? 'Hold SHOOT to let it ring.' : 'Hold F to let it ring.'],
-  got() { gear.switch = true; hud(); setQuest('tree'); say(['Now we talking. Go holla at the Great Trap Tree. Type shit.']); },
+  got() {
+    gear.switch = true; hud(); setQuest('tree');
+    say(['Now we talking. Go holla at the Great Trap Tree. Type shit.', 'He stay hid in his grove. Take the path past the market stall, out through the rocks. Type shit.']);
+  },
 });
 const nearTree = () => player.position.distanceTo(world.treePos) < 9;
 
@@ -187,7 +202,7 @@ function watchChest(chest) {
   cine.on = true;
 }
 
-// E (or USE): read on, throw what he is carrying, pick up, open, or talk
+// E (or the ACTION button): read on, throw what he is carrying, pick up, open, or talk
 function use() {
   if (open) { advance(); return; }
   if (carrying) { throwPot(); return; }
@@ -197,11 +212,14 @@ function use() {
     carrying = n.obj;
     items.lift(carrying);
     toneda.carrying = true;
+    audio.play('lift');
   } else if (n && n.kind === 'chest') {
     const chest = n.obj;
     facing = Math.atan2(chest.pos.x - player.position.x, chest.pos.z - player.position.z);
     items.open(chest);
     watchChest(chest);
+    audio.play('chest');
+    audio.play('item');
     say(chest.item.lines, chest.item.name, () => { cine.on = false; items.dismiss(chest); chest.item.got(); });
   } else if (nearTree()) treeTalk();
   else say(NUDGE[quest]);
@@ -209,6 +227,7 @@ function use() {
 function throwPot() {
   const r = player.rotation.y;
   items.toss(carrying, Math.sin(r), Math.cos(r));
+  audio.play('toss');
   carrying = null;
   toneda.carrying = false;
   attackCooldown = 0.3;
@@ -219,6 +238,7 @@ function damage(o, amount) {
   if (o.hp <= 0) return;
   o.hp -= amount;
   o.flinch = 0.16;
+  audio.play(o.hp > 0 ? 'hit' : 'oppDown');
   if (o.hp > 0) return;
   scene.remove(o.e);
   kills++;
@@ -261,7 +281,8 @@ function shoot() {
   shotRay.far = reach;
   shotRay.set(muzzle, aim.normalize());
   const wall = shotRay.intersectObjects(world.solids, false)[0];
-  if (wall) { shotEnd.copy(wall.point); reach = wall.distance; target = null; }
+  if (wall) { shotEnd.copy(wall.point); reach = wall.distance; target = null; audio.play('ricochet'); }
+  audio.play('shot');
   // the streak is drawn from the gun in his right hand, so it shows from behind him too
   const out = Math.min(0.9, reach * 0.8);
   muzzle.set(p.x + dirX * out - dirZ * 0.42, gunY, p.z + dirZ * out + dirX * 0.42);
@@ -279,7 +300,7 @@ function hit(kind = 'melee') {
   if (open || climbing) return;
   if (carrying) { if (kind === 'melee') throwPot(); return; }
   if (kind === 'fire') {
-    if (!gear.switch) { say(['You ain’t got your Switch yet. Type shit.']); return; }
+    if (!gear.switch) { audio.play('empty'); say(['You ain’t got your Switch yet. Type shit.']); return; }
     if (attackCooldown > 0) return;
     attackCooldown = 0.17;
     toneda.play('fire');
@@ -290,19 +311,21 @@ function hit(kind = 'melee') {
   attackCooldown = 0.43;
   combo = (combo + 1) % 3;
   toneda.play(combo === 1 ? 'punchR' : combo === 2 ? 'punchL' : 'kick');
+  audio.play('swing');
   for (const o of enemies) if (o.hp > 0 && o.e.position.distanceTo(player.position) < 3) damage(o, 1);
   // a pot in front of him breaks
   const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
   for (const pot of items.pots) {
     if (pot.state !== 'rest') continue;
     const dx = pot.mesh.position.x - player.position.x, dz = pot.mesh.position.z - player.position.z, d = Math.hypot(dx, dz);
-    if (d < 2.2 && Math.abs(pot.mesh.position.y - player.position.y) < 1 && (dx * fx + dz * fz) / (d || 1) > 0.2) items.smash(pot);
+    if (d < 2.2 && Math.abs(pot.mesh.position.y - player.position.y) < 1 && (dx * fx + dz * fz) / (d || 1) > 0.2) { audio.play('hit'); items.smash(pot); }
   }
 }
 function transform() {
   if (open || carrying) return;
   og = !og;
   toneda.transform(og);
+  audio.play('transform');
   niggy.react('surprised', 1.1);
   niggy.spin();
   say([og ? 'From YN to OG! Type shit.' : 'Back to YN. Type shit.']);
@@ -313,16 +336,21 @@ function action(a) {
   if (a === 'fire') hit('fire');
   if (a === 'form') transform();
   if (a === 'jump' && climbing) { climbing = null; toneda.release(); velocity = 0; }   // let go of the ladder
-  else if (a === 'jump' && grounded && !open) { velocity = 7; grounded = false; }
-  if (a === 'roll' && rollTime <= 0 && !open && !climbing && !carrying) { rollTime = 0.6; toneda.play('roll'); }
+  else if (a === 'jump' && grounded && !open) { velocity = 7; grounded = false; audio.play('jump'); }
+  if (a === 'roll' && rollTime <= 0 && !open && !climbing && !carrying) { rollTime = 0.6; toneda.play('roll'); audio.play('roll'); }
 }
 
 // ---------- input ----------
+// the keys drawn on screen light up while they are held
+const light = (k, on) => { for (const el of document.querySelectorAll('[data-key]')) if (el.dataset.key === k) el.classList.toggle('on', on); };
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   keys.add(k);
+  light(k, true);
   if (e.code === 'Space') e.preventDefault();
-  if (!active || e.repeat) return;
+  if (e.repeat) return;
+  if (k === 'm') setSound(audio.muted);
+  if (!active) return;
   if (k === 'e' || e.key === 'Enter') action('use');
   if (k === 'j') action('hit');
   if (k === 'f') action('fire');
@@ -330,8 +358,26 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') action('jump');
   if (k === 't') action('form');
 });
-addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
-// touch: a joystick to move, buttons to act (SHOOT can be held down)
+addEventListener('keyup', e => { keys.delete(e.key.toLowerCase()); light(e.key.toLowerCase(), false); });
+addEventListener('blur', () => { for (const k of keys) light(k, false); keys.clear(); });   // no key stays stuck when the window loses focus
+// sound on and off: the button in the corner, or M
+const soundButton = document.getElementById('sound');
+function setSound(on) {
+  audio.setMuted(!on);
+  soundButton.textContent = on ? 'SOUND ON' : 'SOUND OFF';
+}
+setSound(!audio.muted);
+soundButton.addEventListener('pointerdown', e => { e.stopPropagation(); setSound(audio.muted); });
+// While someone is talking, a tap or a click anywhere on the screen reads on (and does nothing else:
+// it does not also press the button or turn the camera under the finger). A tap in the first
+// instant is ignored, so a line that pops up mid-fight is not skipped by accident.
+addEventListener('pointerdown', e => {
+  if (!active || !open || e.target === soundButton) return;
+  e.stopPropagation();
+  e.preventDefault();
+  if (performance.now() - saidAt > 250) advance();
+}, true);
+// on-screen buttons, for a finger or the mouse (SHOOT can be held down); a joystick to move by touch
 const stick = makeStick(document.getElementById('stick'), document.getElementById('knob'));
 for (const b of document.querySelectorAll('#pad button')) {
   b.addEventListener('pointerdown', e => {
@@ -342,8 +388,8 @@ for (const b of document.querySelectorAll('#pad button')) {
   });
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(type, () => { if (b.dataset.hold) keys.delete(b.dataset.hold); });
 }
-panel.addEventListener('pointerdown', () => { if (active && open) advance(); });
 document.getElementById('play').onclick = () => {
+  audio.start();                                  // sound may only begin from a tap or a click
   active = true;
   snapCamera = true;
   document.getElementById('start').remove();
@@ -356,7 +402,7 @@ addEventListener('pointermove', e => { if (e.pointerId === dragId) { yaw += (e.c
 for (const type of ['pointerup', 'pointercancel']) addEventListener(type, e => { if (e.pointerId === dragId) dragId = null; });
 
 // Handy for debugging from the browser console.
-window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, items, gear, stick, fx: { tracer, flash, spark }, cam: null,
+window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, items, gear, stick, audio, fx: { tracer, flash, spark }, cam: null,
   get climbing() { return climbing; }, get grounded() { return grounded; }, get halted() { return halted; },
   get quest() { return quest; }, get rings() { return rings; }, get carrying() { return carrying; }, get open() { return open; },
   get yaw() { return yaw; }, set yaw(v) { yaw = v; } };
@@ -368,6 +414,7 @@ const camFrom = new T.Vector3(), camWant = new T.Vector3(), camDir = new T.Vecto
 let camBack = 5, camUp = 3.4, tip = '';
 const clock = new T.Clock();
 const down = (...names) => names.some(n => keys.has(n));
+const was = new T.Vector3(), STEP = { grass: 'step', wood: 'stepWood', water: 'stepWater' };
 function frame() {
   if (halted) return;                             // graphics were lost: stop for good (see the safety net above)
   requestAnimationFrame(frame);
@@ -386,6 +433,7 @@ function frame() {
     if (inputLock) { if (ix || iz) ix = iz = 0; else inputLock = false; }
     push = Math.min(1, Math.hypot(ix, iz));
     const held = Math.round(ix) + ',' + Math.round(iz), pos = player.position;
+    was.copy(pos);
     if (keys.has('f') && gear.switch) hit('fire');                // hold to keep firing
 
     if (climbing) {
@@ -398,6 +446,7 @@ function frame() {
       else { grab = null; dir = -Math.max(-1, Math.min(1, iz)); }
       pos.x = L.x; pos.z = L.z; facing = L.face;
       pos.y += dir * 2.6 * dt;
+      if ((rungs += Math.abs(dir) * 2.6 * dt) > 0.55) { rungs = 0; audio.play('rung'); }
       toneda.model.actions.climb.timeScale = dir;
       if (pos.y >= L.top) { pos.set(L.exit[0], L.top, L.exit[1]); climbing = null; ladderWait = 0.7; inputLock = true; toneda.release(); }
       else if (pos.y <= 0) { pos.y = 0; climbing = null; ladderWait = 0.5; inputLock = true; toneda.release(); }
@@ -426,12 +475,16 @@ function frame() {
       }
       if (!climbing) {
         world.resolve(pos);
-        const floor = world.groundAt(pos.x, pos.z, pos.y);
+        const floor = world.groundAt(pos.x, pos.z, pos.y), fall = velocity, inAir = !grounded;
         velocity -= 18 * dt;
         pos.y += velocity * dt;
         // land, or stay glued to the floor on gentle slopes like the bridges
         if (pos.y <= floor || (grounded && velocity <= 0 && pos.y - floor < 0.35)) { pos.y = floor; velocity = 0; grounded = true; }
         else grounded = false;
+        if (inAir && grounded && fall < -4) { audio.play('land'); stride = 0; }
+        // a footstep for every stride he really covers (none while he pushes against a wall)
+        if (grounded && rollTime <= 0) stride += Math.min(0.6, Math.hypot(pos.x - was.x, pos.z - was.z));
+        if (stride > (sprint ? 2.5 : push < 0.6 ? 1.4 : 2.0)) { stride = 0; audio.play(STEP[world.floorKind(pos.x, pos.z, pos.y)]); }
       }
     }
     // turn smoothly toward the direction of travel
@@ -439,6 +492,7 @@ function frame() {
     player.rotation.y += turn * Math.min(1, dt * 16);
 
     const h = toneda.spec.height, inside = world.indoors(pos.x, pos.z, pos.y), heading = player.rotation.y;
+    audio.update(inside);
     // whatever he is carrying rides above his head
     if (carrying) items.carry(carrying, pos.x + Math.sin(heading) * 0.2, pos.y + h + 0.02, pos.z + Math.cos(heading) * 0.2, heading);
     // Niggy hovers at ToneDa's right shoulder, a touch ahead of him, and tucks in closer in a room.
@@ -487,6 +541,7 @@ function frame() {
     player: player.position,
     onRing() {
       rings++;
+      audio.play('ring');
       hud();
       if (rings === 1 && !open) say(['A gold ring! Keep stacking them, gang. Type shit.']);
     },
@@ -499,7 +554,7 @@ function frame() {
   for (const o of enemies) { o.flinch = Math.max(0, o.flinch - dt); o.e.scale.setScalar(1 + o.flinch * 1.4); }
   if (tracerTime > 0 && (tracerTime -= dt) <= 0) tracer.visible = flash.visible = spark.visible = false;
 
-  // what E would do right now
+  // what E (the ACTION button) would do right now
   let want = '';
   if (active && !open && !climbing) {
     const n = carrying ? null : items.near(player.position);
@@ -507,7 +562,8 @@ function frame() {
   }
   if (want !== tip) {
     tip = want;
-    prompt.textContent = USE + ' · ' + tip;
+    if (touch) prompt.textContent = 'ACTION · ' + tip;
+    else prompt.innerHTML = '<kbd>E</kbd>' + tip;
     prompt.style.display = tip ? 'block' : 'none';
   }
 

@@ -77,6 +77,7 @@ export class Items {
     this.pots = []; this.chests = []; this.rings = []; this.bits = [];
     this.shard = new T.TetrahedronGeometry(0.15);
     this.time = 0;
+    this.sound = () => {};                           // game.js plugs the sound in here
   }
 
   // ---------- setting things out ----------
@@ -136,6 +137,7 @@ export class Items {
     if (pot.state === 'gone') return;
     if (pot.state === 'rest') this.lift(pot);                       // clears its collider
     pot.state = 'gone';
+    this.sound('smash');
     this.scene.remove(pot.mesh);
     const at = pot.mesh.position;
     for (let i = 0; i < 9; i++) {
