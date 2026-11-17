@@ -44,6 +44,13 @@ ARMF = close_holes(largest(ARM_POLY & fg & ~red), 2)
 SIDE_CX = 563
 side_fg = fg & P([(400, 170), (662, 170), (662, 890), (400, 890)])
 SIDE_HEAD = side_fg & (rows_all < 352)
+# The side of the head is textured from this view. The lens of his shades is painted out of it
+# first: the shades are already on the front of the head, and a second lens round the side shows
+# up as a ghost whenever he is seen at an angle. The arm of the shades, over his ear, stays.
+side_img = paint_out(img, P([(593, 254), (626, 254), (626, 297), (593, 297)]), skin)
+# The ear and its ring come off too: the ear is a piece of its own, and a painted one beside it reads as two.
+side_img = paint_out(side_img, P([(512, 272), (540, 272), (562, 280), (562, 312), (560, 332), (536, 332), (534, 308), (520, 290)]))
+SIDE_HEAD_IN = erode(SIDE_HEAD, 2)                                 # in from the outline, where the art fades into the white page
 SIDE_LEGS = side_fg & (rows_all > 660) & P([(512, 660), (640, 660), (640, 890), (512, 890)]) & ~((red | gold_loose) & (rows_all < 790))
 
 # ---------------- back view parts ----------------
@@ -94,11 +101,12 @@ SIDE = lambda valid: {'img': img, 'valid': valid, 'cx': SIDE_CX, 'dir': -1}
 hb_img, hb_valid = back_in_front(img), back_in_front(HEADB_VALID, cv2.INTER_NEAREST)
 (o, (m, f_rgb, b_rgb, b_val)) = crop(HEAD[:, :FW], front, hb_img, hb_valid)
 b.solid('head', m, f_rgb, m, b_rgb, b_val, o, axis=AXF, ground=GROUND, step=5, R=58, Tf=52, Tb=68, c=1.3, z0=-6,
-        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front', side=SIDE(SIDE_HEAD))
+        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front',
+        side={'img': side_img, 'valid': SIDE_HEAD_IN, 'cx': SIDE_CX, 'dir': -1, 'n0': 0.6, 'n1': 0.8}, side_faces=0.7)
 
 (o, (m, f_rgb)) = crop(EAR[:, :FW], front)
-b.solid('earL', m, f_rgb, m, None, None, o, axis=AXF, ground=GROUND, step=3, R=8, Tf=6, Tb=6, c=0.9, z0=-26,
-        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front', mirror_as='earR')
+b.solid('earL', m, f_rgb, m, None, None, o, axis=AXF, ground=GROUND, step=3, R=8, Tf=6, Tb=6, c=0.9, z0=-8,
+        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front', mirror_as='earR', sweep=(49, 1.0))
 
 (o, (m, f_rgb, mv)) = crop(TORSO[:, :FW], front, (grey | (rows_all < 541))[:, :FW])
 b.solid('torso', m, f_rgb, m, None, None, o, axis=AXF, ground=GROUND, step=5, R=40, Tf=44, Tb=38, c=1.2, z0=0,

@@ -48,7 +48,16 @@ SHOULDER = P([(262, 334), (300, 316), (352, 298), (352, 371), (277, 371), (262, 
 SIDE_CX = 1075                                           # image column of his centre plane
 side_fg = fg & P([(920, 0), (1345, 0), (1345, 1010), (920, 1010)])
 SIDE_HEAD = side_fg & (rows_all < 300)
+# The side of the head is textured from this view. Its eye and brow are painted out first: the
+# face is already on the front of the head, and a second eye round the side shows up as a ghost
+# whenever he is seen at an angle. What is left there is plain cheek, as on any game model.
+side_img = paint_out(img, P([(996, 154), (1026, 154), (1026, 176), (1031, 180), (1031, 220), (998, 220)]), skin)
+# The ear and its ring come off too: the ear is a piece of its own, and a painted one beside it reads as two.
+side_img = paint_out(side_img, P([(1080, 172), (1120, 166), (1192, 162), (1192, 196), (1140, 236), (1126, 266), (1098, 266), (1080, 240)]))
 SIDE_LEGS = side_fg & (rows_all > 655) & P([(925, 655), (1172, 655), (1172, 1010), (925, 1010)]) & ~((red | (Hh >= 34) & (Ss > 0.6) & (Vv > 0.5)) & (rows_all < 800))
+# His right side is under the hood's hanging end, so it takes only the hood's cloth from this view.
+SIDE_HEAD_R = erode(SIDE_HEAD & red & ~skin, 2)
+SIDE_HEAD_L = erode(SIDE_HEAD, 3)                        # in from the outline, where the art fades into the white page
 
 # ---------------- back view parts ----------------
 HEADB_VALID = fg & (rows_all < 292) & P([(1560, 0), (2010, 0), (2010, 292), (1560, 292)]) & ~skin
@@ -111,12 +120,13 @@ front = img[:, :800]
 hb_img, hb_valid = back_in_front(img), back_in_front(HEADB_VALID, cv2.INTER_NEAREST)
 (o, (m, f_rgb, b_rgb, b_val)) = crop(HEAD[:, :800], front, hb_img, hb_valid)
 b.solid('head', m, f_rgb, m, b_rgb, b_val, o, axis=AXF, ground=GROUND, step=7, R=100, Tf=128, Tb=140, c=1.3, z0=-22,
-        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front', side={'img': img, 'valid': SIDE_HEAD, 'cx': SIDE_CX})
+        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front',
+        side={'img': side_img, 'valid': SIDE_HEAD_L, 'valid_right': SIDE_HEAD_R, 'cx': SIDE_CX, 'n0': 0.6, 'n1': 0.8}, side_faces=0.7)
 
 # ears: thin wings from the front view, the same on both sides
 (o, (m, f_rgb)) = crop(EAR[:, :800], front)
-b.solid('earL', m, f_rgb, m, None, None, o, axis=AXF, ground=GROUND, step=5, R=14, Tf=10, Tb=10, c=0.9, z0=-48,
-        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front', mirror_as='earR')
+b.solid('earL', m, f_rgb, m, None, None, o, axis=AXF, ground=GROUND, step=5, R=14, Tf=10, Tb=10, c=0.9, z0=-20,
+        weights=lambda x, y: [{'head': 1.0}] * len(x), fallback='front', mirror_as='earR', sweep=(113, 1.8))
 
 # torso: nothing of his back shows under the cape, so paint it from the front's row colours
 (o, (m, f_rgb, mv)) = crop(TORSO[:, :800], front, (grey | (rows_all < 552))[:, :800])

@@ -7,10 +7,16 @@ from the turnaround images in `assets/references/final/`.
 1. The front view is cut into body parts: head, ear, torso, shoulder pads, each leg, one arm.
 2. Each part becomes a rounded solid whose outline is that part's outline in the art.
    The front of the solid is textured with the front view and the back with the back view.
-   Where a surface faces sideways, colours are taken from the side view.
-3. The arm is straightened to hang down and mirrored for the other side.
-4. The cape is one curved sheet taken from the back view, weighted to a chain of bones so it flows.
-5. Every vertex is weighted to the game's skeleton (same bone names as `src/character/toneda.js`),
+   Where a surface faces sideways, colours are taken from the side view. On the head those
+   sideways faces get texture tiles of their own, so the side view is used at full size.
+   The side view's eye (YN) and shades (OG) are painted out first: the face is already on the
+   front, and a second one round the side shows as a ghost when he is seen at an angle.
+   Only the hood's cloth is taken for YN's right side, which is under the hood's hanging end.
+3. The ears are thin pieces of their own, laid back along the head (the painted ear is taken
+   off the side view, so there is only one).
+4. The arm is straightened to hang down and mirrored for the other side.
+5. The cape is one curved sheet taken from the back view, weighted to a chain of bones so it flows.
+6. Every vertex is weighted to the game's skeleton (same bone names as `src/character/toneda.js`),
    and the result is written as a standard `.glb` with one texture.
 
 ## Rebuilding
@@ -28,7 +34,7 @@ The part outlines, joint heights and thicknesses at the top of each `build_*.py`
 coordinates in that specific image. A new turnaround needs those numbers re-measured.
 
 ## Limits
-- Exact from the front and back; the sides are an approximation.
-- Faces are flat artwork on a rounded head, with no modelled nose or brow.
+- Exact from the front and back. The sides of the head use the side view; the sides of the body are an approximation.
+- Faces are flat artwork on a rounded head, with no modelled nose or brow, so there is no eye in a dead-on side view.
 - The left arm is a mirror of the right arm.
 - A sculpted model from a 3D tool would still be better from the side.

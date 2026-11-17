@@ -2,7 +2,8 @@
 #
 # The art is cut into body parts. Each part becomes a rounded solid whose outline is
 # the part's outline in the front view; the front of the solid is textured with the
-# front view and the back with the back view. The cape is a separate curved sheet
+# front view and the back with the back view. On the head, the faces that are turned
+# sideways get tiles of their own from the side view. The cape is a separate curved sheet
 # taken from the back view. Every vertex is weighted to the game's skeleton, and
 # the result is written as a standard .glb.
 #
@@ -214,8 +215,53 @@ def bake_side(tile, mask, h_img, width, z_img, R, side):
     xs = (side['cx'] - side.get('dir', 1) * z_img).astype(np.float32)   # dir=1: he faces image-left in the side view
     rgb = cv2.remap(side['img'], xs, rows, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     ok = cv2.remap(side['valid'].astype(np.uint8) * 255, xs, rows, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0) > 220
+    if 'valid_right' in side:                             # his right side may take less from the side view (which shows his left)
+        okr = cv2.remap(side['valid_right'].astype(np.uint8) * 255, xs, rows, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0) > 220
+        ok = np.where(np.arange(tile.shape[1])[None, :] < side['axis_col'], okr, ok)
     ws = cv2.GaussianBlur((ws * ok).astype(np.float32), (0, 0), 2.0)[..., None]
-    return (tile.astype(np.float32) * (1 - ws) + rgb.astype(np.float32) * ws).astype(np.uint8)
+    return (tile.astype(np.float32) * (1 - ws) + rgb.astype(np.float32) * ws).astype(np.uint8), ws[..., 0]
+
+
+def side_tiles(mask, hf_img, hb_img, z0_rows, front_tile, back_tile, wf, wb, side):
+    """The same surface colours as the front and back tiles, laid out as the part is seen from
+    the side (across: depth, down: height) for his left side and his right.
+
+    Where the surface faces sideways the front and back tiles hold it squeezed into a few
+    texels, so from the side it smears. These tiles give those faces the side art at full size.
+    Each texel (depth z, row y) looks up the outermost point of the solid at that depth: its
+    colour in the front or back tile, blended with the side art by the weight bake_side used
+    there. So a face reads the same colour from either tile, and the join does not show.
+    Returns (zmax, [left tile, right tile]); a point at depth z sits at column zmax - z."""
+    h, w = mask.shape
+    zmax = int(math.ceil(float((z0_rows[:, None] + hf_img).max()))) + 2
+    zmin = int(math.floor(float((z0_rows[:, None] - hb_img).min()))) - 2
+    K = zmax - zmin + 1
+    zs = zmax - np.arange(K, dtype=np.float32)
+    tiles = []
+    for sgn in (1, -1):                                   # 1: his left (image right), -1: his right
+        own = np.zeros((h, K, 3), np.float32); art_img = np.zeros((h, K, 3), np.float32)
+        wt = np.zeros((h, K, 1), np.float32); got = np.zeros((h, K), bool)
+        for y in range(h):
+            cols = np.where(mask[y])[0]
+            if not len(cols):
+                continue
+            order = cols[::-1] if sgn == 1 else cols        # walking in from the outside
+            for h_img, tile, wimg, t in ((hf_img, front_tile, wf, zs - z0_rows[y]), (hb_img, back_tile, wb, z0_rows[y] - zs)):
+                run = np.maximum.accumulate(h_img[y, order])   # thickest seen so far, from the outside in
+                k = np.searchsorted(run, np.maximum(t, 0), side='left')
+                ok = (t >= 0) & (k < len(order))
+                if h_img is hb_img:
+                    ok &= t > 0                             # depth exactly on the centre plane belongs to the front
+                x = order[np.minimum(k, len(order) - 1)]
+                wgt = wimg[y, x][:, None]
+                srow = np.full(K, side['row0'] + y, np.float32)
+                scol = (side['cx'] - side.get('dir', 1) * zs).astype(np.float32)
+                art = cv2.remap(side['img'], scol[None, :], srow[None, :], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)[0].astype(np.float32)
+                own[y, ok] = tile[y, x][ok]; art_img[y, ok] = art[ok]; wt[y, ok] = wgt[ok]; got[y, ok] = True
+        # the part's own colours are stretched thin here: soften them, so they read as cloth and not as streaks
+        own = cv2.GaussianBlur(bleed(own.astype(np.uint8), got), (0, 0), sigmaX=1.5, sigmaY=3.5).astype(np.float32)
+        tiles.append(bleed(np.clip(own * (1 - wt) + art_img * wt, 0, 255).astype(np.uint8), got))
+    return zmax, tiles
 
 
 class Atlas:
@@ -256,7 +302,7 @@ class Builder:
 
     def solid(self, name, mask, front_rgb, front_valid, back_rgb, back_valid, origin, *, axis, ground,
               step, R, Tf, Tb, c=1.0, cb=None, z0=0.0, weights, fallback='front', mirror_as=None, pad=14,
-              x_shift=0.0, median_valid=None, side=None):
+              x_shift=0.0, median_valid=None, side=None, side_faces=None, sweep=None):
         """mask/images are crops whose top-left is `origin` in front-view pixels.
         Tf/Tb/z0 may be numbers or functions of the pixel row (front-view y)."""
         h, w = mask.shape
@@ -295,12 +341,20 @@ class Builder:
             rim = dilate(bv, 3) & ~erode(bv, 3)
             back_tile = np.where(rim[..., None], soft, back_tile)
             back_tile = np.where((~mask)[..., None], bleed(back_tile, mask), back_tile)
+        stiles = None
         if side is not None:
-            sd = dict(side, row0=origin[1])
-            front_tile = bake_side(front_tile, mask, hf_img, width, z0_rows[:, None] + hf_img, R, sd)
-            back_tile = bake_side(back_tile, mask, hb_img, width, z0_rows[:, None] - hb_img, R, sd)
+            sd = dict(side, row0=origin[1], axis_col=axis - origin[0])
+            plain_f, plain_b = front_tile, back_tile
+            front_tile, wf = bake_side(front_tile, mask, hf_img, width, z0_rows[:, None] + hf_img, R, sd)
+            back_tile, wb = bake_side(back_tile, mask, hb_img, width, z0_rows[:, None] - hb_img, R, sd)
             front_tile = np.where(mask[..., None], front_tile, bleed(front_tile, mask))
             back_tile = np.where(mask[..., None], back_tile, bleed(back_tile, mask))
+            if side_faces is not None:                  # faces turned further sideways than this get tiles of their own
+                assert mirror_as is None
+                zmax, stiles = side_tiles(mask, hf_img, hb_img, z0_rows, plain_f, plain_b, wf, wb, sd)
+                spos = [self.atlas.add(cv2.copyMakeBorder(t, pad, pad, pad, pad, cv2.BORDER_REPLICATE)) for t in stiles]
+                if self.debug:
+                    Image.fromarray(np.hstack(stiles)).save(f'{self.debug}/tile_{name}_sides.png')
         fpos = self.atlas.add(cv2.copyMakeBorder(front_tile, pad, pad, pad, pad, cv2.BORDER_REPLICATE))
         bpos = self.atlas.add(cv2.copyMakeBorder(back_tile, pad, pad, pad, pad, cv2.BORDER_REPLICATE))
         if self.debug:
@@ -322,11 +376,28 @@ class Builder:
             wfun = weights if sign == 1 else (lambda x, y, f=weights: [swap_lr(d) for d in f(-x, y)])
             Xs = X * sign
             wl = wfun(Xs, Y)
-            front = np.stack([Xs, Y, zc + hf], 1); back = np.stack([Xs, Y, zc - hb], 1)
+            # sweep = (x0, k): the part leans back by k for every pixel it reaches out past x0 (ears lie back along the head)
+            zs = zc if sweep is None else zc - sweep[1] * np.clip(np.abs(Xs) - sweep[0], 0, None)
+            front = np.stack([Xs, Y, zs + hf], 1); back = np.stack([Xs, Y, zs - hb], 1)
             fuv = pts + np.array(fpos) + pad; buv = pts + np.array(bpos) + pad
             ft = ftris if sign == 1 else ftris[:, ::-1]
-            self.add_mesh(nm + '_front', front, fuv, ft, wl)
-            self.add_mesh(nm + '_back', back, buv, ft[:, ::-1], wl)
+            if stiles is None:
+                self.add_mesh(nm + '_front', front, fuv, ft, wl)
+                self.add_mesh(nm + '_back', back, buv, ft[:, ::-1], wl)
+                continue
+            # split each surface: faces that look forward or back keep their tile, faces turned sideways use a side tile
+            for surf, xyz, uv0, tri in (('front', front, fuv, ft), ('back', back, buv, ft[:, ::-1])):
+                n = np.cross(xyz[tri[:, 1]] - xyz[tri[:, 0]], xyz[tri[:, 2]] - xyz[tri[:, 0]])
+                nx = n[:, 0] / np.maximum(np.linalg.norm(n, axis=1), 1e-9)
+                keep = np.abs(nx) <= side_faces
+                self.add_mesh(f'{nm}_{surf}', xyz, uv0, tri[keep], wl)
+                for k, sgn in enumerate((1, -1)):
+                    sel = tri[~keep & (nx * sgn > 0)]
+                    if not len(sel):
+                        continue
+                    used, inv = np.unique(sel, return_inverse=True)
+                    suv = np.stack([zmax - xyz[used, 2], pts[used, 1]], 1) + np.array(spos[k]) + pad
+                    self.add_mesh(f'{nm}_{surf}_side{"LR"[k]}', xyz[used], suv, inv.reshape(-1, 3), [wl[i] for i in used])
 
     def sheet(self, name, mask, rgb, valid, origin, *, axis, ground, step, zfun, weights, mirrored_view, pad=14):
         """A single curved surface (the cape). zfun(x_model_px, row) -> z."""
@@ -341,6 +412,14 @@ class Builder:
         Y = ground - rows
         Z = zfun(X, rows)
         self.add_mesh(name, np.stack([X, Y, Z], 1), pts + np.array(pos) + pad, tris, weights(X, Y))
+
+
+def paint_out(img, region, keep=None):
+    """Inside `region`, replace everything that is not `keep` with the colours around it
+    (used to take the eye off the side view, leaving plain cheek)."""
+    hole = (region if keep is None else region & ~keep).astype(np.uint8) * 255
+    hole = cv2.dilate(hole, np.ones((3, 3), np.uint8))
+    return cv2.inpaint(img, hole, 4, cv2.INPAINT_TELEA)
 
 
 def swap_lr(d):
