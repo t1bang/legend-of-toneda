@@ -21,7 +21,7 @@ the same bone names.
 | `src/character/art.js` | Loads the art-built `.glb` models and the shield, and attaches the shield and GlockNina to their bones |
 | `tools/artmodel/` | Python scripts that turn a turnaround image into a rigged `.glb` |
 | `src/character/niggy.js` | Niggy: orb, bat wings, seven swappable faces, glow, flames, hover/flap/spin |
-| `src/world.js` | Trap Village: cliffs, trees, paths, Trap House, stilt huts, stump homes, Great Trap Tree, pond, stall, plus collision |
+| `src/world.js` | Trap Village: cliffs, trees, paths, the Trap House, treetop huts and stump homes (all walk-in, with furnished rooms), Great Trap Tree, pond, stall, plus collision |
 | `viewer.html` | Model viewer: spin either form, play any clip, try Niggy's expressions |
 
 ## Clips

@@ -95,6 +95,28 @@ function glowTexture() {
   t.colorSpace = T.SRGBColorSpace;
   return t;
 }
+// Dark cracks over the orb, as in the side and back views of his reference sheet.
+function crackTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 256, 128);
+  let seed = 7;
+  const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  g.lineCap = 'round';
+  for (let i = 0; i < 46; i++) {
+    let x = r() * 256, y = 14 + r() * 100, a = r() * 6.28;
+    g.strokeStyle = `rgba(38,0,6,${0.35 + r() * 0.4})`;
+    g.lineWidth = 1 + r() * 1.6;
+    g.beginPath(); g.moveTo(x, y);
+    for (let j = 0; j < 4; j++) { a += (r() - 0.5) * 1.6; x += Math.cos(a) * (8 + r() * 14); y += Math.sin(a) * (5 + r() * 9); g.lineTo(x, y); }
+    g.stroke();
+  }
+  const t = new T.CanvasTexture(c);
+  t.colorSpace = T.SRGBColorSpace;
+  t.wrapS = T.RepeatWrapping;
+  return t;
+}
 function wingGeometry() {
   const s = new T.Shape();
   s.moveTo(0, 0);
@@ -124,7 +146,7 @@ export class Niggy {
       col.push(c.r, c.g, c.b);
     }
     geo.setAttribute('color', new T.Float32BufferAttribute(col, 3));
-    this.body.add(new T.Mesh(geo, new T.MeshBasicMaterial({ vertexColors: true })));
+    this.body.add(new T.Mesh(geo, new T.MeshBasicMaterial({ vertexColors: true, map: crackTexture() })));
     this.rim = new T.Mesh(new T.SphereGeometry(0.43, 12, 8),
       new T.MeshBasicMaterial({ color: RED, transparent: true, opacity: 0.3, side: T.BackSide, depthWrite: false }));
     this.body.add(this.rim);
@@ -191,8 +213,12 @@ export class Niggy {
   spin() { this.spinLeft = 0.7; }
   warpTo(v) { this.root.position.copy(v); }
 
-  // target: where he should hover; camera: so his face stays readable
-  update(dt, target, camera) {
+  // target: where he should hover.
+  // look: which way he faces. Left out, he keeps his face to the camera (the model viewer).
+  //   talking: true   he is speaking to the player, so he turns to the camera
+  //   at: Vector3     otherwise he looks at that spot (an Opp, or whoever is speaking)
+  //   heading: angle  otherwise he looks the way he is flying, or the way ToneDa is heading
+  update(dt, target, camera, look = null) {
     this.time += dt;
     const t = this.time, before = this.root.position.clone();
     if (target) {
@@ -202,7 +228,16 @@ export class Niggy {
     }
     this.velocity.copy(this.root.position).sub(before).divideScalar(Math.max(dt, 1e-4));
     this.speed += (Math.min(this.velocity.length(), 14) - this.speed) * Math.min(1, dt * 8);
-    if (camera) this.root.rotation.y = Math.atan2(camera.position.x - this.root.position.x, camera.position.z - this.root.position.z);
+    const here = this.root.position, toward = v => Math.atan2(v.x - here.x, v.z - here.z);
+    let want = null;
+    if (!look || look.talking) { if (camera) want = toward(camera.position); }
+    else if (look.at) want = toward(look.at);
+    else if (Math.hypot(this.velocity.x, this.velocity.z) > 1.5) want = Math.atan2(this.velocity.x, this.velocity.z);
+    else if (look.heading != null) want = look.heading;
+    if (want !== null) {
+      const turn = Math.atan2(Math.sin(want - this.root.rotation.y), Math.cos(want - this.root.rotation.y));
+      this.root.rotation.y += look ? turn * (1 - Math.exp(-dt * 9)) : turn;      // turn smoothly in the game
+    }
 
     const excited = this.spinLeft > 0 || this.speed > 4;
     const flap = Math.sin(t * (excited ? 26 : 11));

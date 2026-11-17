@@ -174,11 +174,13 @@ addEventListener('pointerup', () => drag = false);
 addEventListener('pointermove', e => { if (drag) { yaw += (e.clientX - px) * 0.006; px = e.clientX; } });
 
 // Handy for debugging from the browser console.
-window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null, get climbing() { return climbing; }, get grounded() { return grounded; }, get halted() { return halted; } };
+window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null, get climbing() { return climbing; }, get grounded() { return grounded; }, get halted() { return halted; },
+  get yaw() { return yaw; }, set yaw(v) { yaw = v; } };
 
 // ---------- main loop ----------
 niggy.warpTo(new T.Vector3(world.spawn.x + 1.1, toneda.spec.height - 0.2, world.spawn.z + 0.6));
 const camFrom = new T.Vector3(), camWant = new T.Vector3(), camDir = new T.Vector3(), camRay = new T.Raycaster();
+let camBack = 8, camUp = 4.5;
 const clock = new T.Clock();
 const down = (...names) => names.some(n => keys.has(n));
 function frame() {
@@ -248,13 +250,22 @@ function frame() {
     const turn = Math.atan2(Math.sin(facing - player.rotation.y), Math.cos(facing - player.rotation.y));
     player.rotation.y += turn * Math.min(1, dt * 16);
 
-    const h = toneda.spec.height;
-    niggyTarget.set(player.position.x + 1.1, player.position.y + h - 0.2, player.position.z + 0.6);
+    const h = toneda.spec.height, inside = world.indoors(player.position.x, player.position.z, player.position.y);
+    // Niggy hovers at ToneDa's right shoulder, a touch ahead of him, and tucks in closer in a room.
+    // He never sits inside a wall or a trunk, and when ToneDa turns round he crosses over his head, not through it.
+    const heading = player.rotation.y, out = inside ? 0.75 : 0.95, ahead = inside ? 0.1 : 0.25;
+    niggyTarget.set(player.position.x - Math.cos(heading) * out + Math.sin(heading) * ahead, player.position.y + h - 0.2,
+      player.position.z + Math.sin(heading) * out + Math.cos(heading) * ahead);
+    world.resolve(niggyTarget, 0.45);
+    const overhead = 1 - Math.hypot(niggy.root.position.x - player.position.x, niggy.root.position.z - player.position.z) / 0.7;
+    if (overhead > 0) niggyTarget.y += overhead * 1.1;
     // while climbing, swing the camera round behind him so it looks at the ladder
     if (climbing) yaw += Math.atan2(Math.sin(climbing.face - yaw), Math.cos(climbing.face - yaw)) * Math.min(1, dt * 4);
-    const back = sprint ? 10 : 8;
+    // the camera sits closer and lower indoors, so it stays in the room with him
+    camBack += ((inside ? 5 : sprint ? 10 : 8) - camBack) * Math.min(1, dt * 4);
+    camUp += ((inside ? Math.min(h * 1.1 + 0.2, 4.1) : sprint ? 5 : 4.5) - camUp) * Math.min(1, dt * 4);
     camFrom.set(player.position.x, player.position.y + h * 0.75, player.position.z);
-    camWant.set(player.position.x - Math.sin(yaw) * back, player.position.y + (sprint ? 5 : 4.5), player.position.z - Math.cos(yaw) * back);
+    camWant.set(player.position.x - Math.sin(yaw) * camBack, player.position.y + camUp, player.position.z - Math.cos(yaw) * camBack);
     // pull the camera in when a wall, trunk or roof is in the way
     camDir.copy(camWant).sub(camFrom);
     const reach = camDir.length();
@@ -276,10 +287,21 @@ function frame() {
   }
   toneda.update(dt, { moving, sprint, grounded, vy: velocity });
 
-  // Niggy: talks while his line types out, scowls when an Opp is close
+  // Niggy: talks while his line types out, scowls when an Opp is close.
+  // He looks where he is going, at a nearby Opp, or at whoever is speaking,
+  // and turns to the player only while he is the one talking.
+  let threat = null, near = 5.5;
+  for (const o of enemies) {
+    const d = o.hp > 0 ? o.e.position.distanceTo(player.position) : Infinity;
+    if (d < near) { near = d; threat = o; }
+  }
   niggy.speak(open && typing && speaker === 'NIGGY');
-  niggy.setExpression(enemies.some(o => o.hp > 0 && o.e.position.distanceTo(player.position) < 5.5) ? 'mad' : 'idle');
-  niggy.update(dt, active ? niggyTarget : null, camera);
+  niggy.setExpression(threat ? 'mad' : 'idle');
+  niggy.update(dt, active ? niggyTarget : null, camera, {
+    talking: open && speaker === 'NIGGY',
+    at: open ? world.treePos : threat ? threat.e.position : null,
+    heading: player.rotation.y,
+  });
   world.update(dt);
   renderer.render(scene, camera);
 }
