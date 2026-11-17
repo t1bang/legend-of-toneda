@@ -22,6 +22,9 @@ the same bone names.
 | `tools/artmodel/` | Python scripts that turn a turnaround image into a rigged `.glb` |
 | `src/character/niggy.js` | Niggy: orb, bat wings, seven swappable faces, glow, flames, hover/flap/spin |
 | `src/world.js` | Trap Village: cliffs, trees, paths, the Trap House, treetop huts and stump homes (all walk-in, with furnished rooms), Great Trap Tree, pond, stall, plus collision |
+| `src/items.js` | Things to use: the flower pot (lift, carry, throw, smash), gold rings, treasure chests and what comes out of them |
+| `src/touch.js` | The on-screen joystick for phones and tablets |
+| `src/game.js` | The game itself: the opening in the tree house, the Switch mission, dialogue, controls, camera, shooting |
 | `viewer.html` | Model viewer: spin either form, play any clip, try Niggy's expressions |
 
 ## Clips

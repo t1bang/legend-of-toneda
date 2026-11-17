@@ -307,6 +307,11 @@ function buildGlockNina(scale) {
   return g;
 }
 
+// Arms raised overhead to carry something. Blended over whatever animation is playing,
+// so he can still walk, turn and jump with his hands full.
+const CARRY = Object.entries({ armL: [-2.9, 0, -0.1], armR: [-2.9, 0, 0.1], foreL: [-0.2, 0, 0], foreR: [-0.2, 0, 0] })
+  .map(([bone, e]) => [bone, new T.Quaternion().setFromEuler(new T.Euler(...e))]);
+
 let sharedMaterial = null;
 function material() {
   if (!sharedMaterial) {
@@ -344,9 +349,16 @@ function buildVariant(name) {
   return { name, spec: s, mesh, bones: sk.byName, mixer, actions, gunHand, gunHip, current: null };
 }
 
+// The Switch (ToneDa's gun) as a stand-alone model, for showing it off when he finds it.
+export function switchModel(scale = 2.4) {
+  return new T.Mesh(buildGlockNina(scale), material());
+}
+
 export class ToneDa {
   constructor() {
     this.root = new T.Group();
+    this.carrying = false;  // set true while he holds something over his head
+    this.lift = 0;
     this.models = { yn: buildVariant('yn'), og: buildVariant('og') };
     for (const m of Object.values(this.models)) {
       this.root.add(m.mesh);
@@ -464,6 +476,8 @@ export class ToneDa {
     this.loco = want;
     if (!this.busy) this._fade(want, want === 'jump' ? 0.08 : 0.16);
     this.model.mixer.update(dt);
+    this.lift += ((this.carrying ? 1 : 0) - this.lift) * Math.min(1, dt * 12);
+    if (this.lift > 0.01) for (const [bone, q] of CARRY) this.model.bones[bone].quaternion.slerp(q, this.lift);
     this._secondary(dt, state, grounded);
   }
 

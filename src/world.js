@@ -118,6 +118,55 @@ function textures() {
   return TEX;
 }
 
+// "TRAP / HOUSE" brushed on in red paint, slanted, with drips. The letters are drawn from
+// strokes rather than a font, so the sign looks the same on every phone and computer.
+const BRUSH = {
+  T: [[[0, 0], [1, 0]], [[0.5, 0], [0.5, 1]]],
+  R: [[[0, 1], [0, 0], [0.72, 0], [1, 0.16], [1, 0.36], [0.72, 0.52], [0, 0.52]], [[0.45, 0.52], [1, 1]]],
+  A: [[[0, 1], [0.5, 0], [1, 1]], [[0.22, 0.64], [0.78, 0.64]]],
+  P: [[[0, 1], [0, 0], [0.72, 0], [1, 0.17], [1, 0.38], [0.72, 0.55], [0, 0.55]]],
+  H: [[[0, 0], [0, 1]], [[1, 0], [1, 1]], [[0, 0.5], [1, 0.5]]],
+  O: [[[0.5, 0], [0.16, 0.12], [0, 0.5], [0.16, 0.88], [0.5, 1], [0.84, 0.88], [1, 0.5], [0.84, 0.12], [0.5, 0]]],
+  U: [[[0, 0], [0, 0.7], [0.2, 0.94], [0.5, 1], [0.8, 0.94], [1, 0.7], [1, 0]]],
+  S: [[[1, 0.14], [0.76, 0], [0.26, 0], [0, 0.16], [0.06, 0.38], [0.5, 0.5], [0.94, 0.62], [1, 0.84], [0.74, 1], [0.24, 1], [0, 0.86]]],
+  E: [[[1, 0], [0, 0], [0, 1], [1, 1]], [[0, 0.5], [0.72, 0.5]]],
+};
+function paintedSign() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 320;
+  const g = c.getContext('2d');
+  let seed = 23;
+  const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  g.translate(256, 160); g.rotate(-0.11); g.translate(-256, -160);       // the slant
+  g.lineCap = g.lineJoin = 'round';
+  const word = (text, top, lw, lh, gap, thick) => {
+    let x = 256 - (text.length * lw + (text.length - 1) * gap) / 2;
+    for (const ch of text) {
+      const jx = (r() - 0.5) * 6, jy = (r() - 0.5) * 8;                  // hand-painted: nothing lines up exactly
+      for (const [color, width, off] of [['#6f0810', thick + 6, 2], ['#d6141f', thick, 0], ['#f0303a', thick * 0.35, -2]]) {
+        g.strokeStyle = color; g.lineWidth = width;
+        for (const stroke of BRUSH[ch]) {
+          g.beginPath();
+          stroke.forEach(([u, v], i) => { const px = x + jx + u * lw + off, py = top + jy + v * lh + off; if (i) g.lineTo(px, py); else g.moveTo(px, py); });
+          g.stroke();
+        }
+      }
+      const feet = BRUSH[ch].flat().filter(([, v]) => v > 0.9);         // paint runs from the bottom of a letter
+      if (feet.length && r() < 0.75) {
+        const [u] = feet[Math.floor(r() * feet.length)], dx = x + jx + u * lw;
+        g.strokeStyle = '#d6141f'; g.lineWidth = 5 + r() * 3;
+        g.beginPath(); g.moveTo(dx, top + jy + lh); g.lineTo(dx, top + jy + lh + 12 + r() * 30); g.stroke();
+      }
+      x += lw + gap;
+    }
+  };
+  word('TRAP', 30, 54, 84, 22, 15);
+  word('HOUSE', 172, 62, 100, 20, 16);
+  const t = new T.CanvasTexture(c);
+  t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+
 function signTexture(text, { w = 256, h = 80, color = '#ff2525', font = 'bold 64px monospace', bg = null, outline = null } = {}) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -338,6 +387,25 @@ export function buildWorld(scene) {
     add(new T.CircleGeometry(rad, 10), M.daylight, sx * rInside, y, cz * rInside, g).rotation.y = th + Math.PI;
     add(new T.TorusGeometry(rad, 0.08, 5, 12), M.planks, sx * rInside, y, cz * rInside, g).rotation.y = th;
   }
+  // a blacked-out window with a plank nailed across it at a slant; the same black pane shows inside
+  // (x, y, z) is the centre of the pane on the outside face of a wall `thick` deep; rotY turns it to face out
+  function boardedWindow(parent, x, y, z, rotY, slant = 0.5, thick = 0.3, w = 1.6, h = 1.9) {
+    const win = new T.Group();
+    win.position.set(x, y, z); win.rotation.y = rotY;
+    parent.add(win);
+    const pane = new T.MeshBasicMaterial({ color: '#060608' });
+    add(new T.PlaneGeometry(w, h), pane, 0, 0, 0.012, win);
+    add(new T.PlaneGeometry(w, h), pane, 0, 0, -thick - 0.012, win).rotation.y = Math.PI;
+    for (const sy of [-1, 1]) box(w + 0.3, 0.15, 0.12, M.planks, 0, sy * (h / 2 + 0.07), 0.05, win);       // frame
+    for (const sx of [-1, 1]) box(0.15, h, 0.12, M.planks, sx * (w / 2 + 0.07), 0, 0.05, win);
+    const plank = box(Math.hypot(w, h) * 0.98, 0.34, 0.09, lam(X.planks, '#c9a070'), 0, 0, 0.13, win);
+    plank.rotation.z = slant;
+    for (const e of [-1, 1]) for (const n of [-0.07, 0.07]) {            // nail heads
+      const k = Math.hypot(w, h) * 0.43 * e;
+      box(0.05, 0.05, 0.03, M.black, Math.cos(slant) * k - Math.sin(slant) * n, Math.sin(slant) * k + Math.cos(slant) * n, 0.185, win);
+    }
+    return win;
+  }
   function bed(g, x, y, z, blanket, rotY = 0) {
     const b = new T.Group();
     b.position.set(x, y, z); b.rotation.y = rotY;
@@ -401,6 +469,9 @@ export function buildWorld(scene) {
     for (const [sx, sz] of stools) solid(sx, sz, 0.4, 0.6);
     solid(0, -3.4, 1.0, W.h);
     solid(Math.sin(th) * 3.45, Math.cos(th) * 3.45, 0.85, 2.9);
+    // a clear spot just inside the door, opposite the table, for something worth finding
+    const cx = -2.3 * flip, cz = 1.75, [wx, wz] = at(cx, cz);
+    g.userData.nook = { pos: new T.Vector3(wx, 0, wz), rotY: faceAngle + Math.atan2(-cx, -cz) };
     return g;
   }
 
@@ -455,8 +526,8 @@ export function buildWorld(scene) {
     return g;
   }
 
-  // ---------- the Trap House: a big cabin on stilts, open to walk into ----------
-  // Platform 12 x 12 with its floor at y = 5.2. The cabin sits toward the back, leaving a porch in front.
+  // ---------- the Trap House: ToneDa's tree house, a big cabin on a deck against a giant tree ----------
+  // Platform 12 x 12 with its floor at y = 5.2. The cabin sits toward the back, leaving a deck in front.
   const TH = { x: -9, z: -8.5 }, FY = 5.2;
   const house = new T.Group();
   house.position.set(TH.x, 0, TH.z);
@@ -467,6 +538,18 @@ export function buildWorld(scene) {
     block(TH.x + px, TH.z + pz, 0.7, -Infinity, 4.5);
   }
   box(12, 0.4, 12, M.planks, 0, 5, 0, house);
+  // the giant tree it is built against: trunk behind the cabin, crown spread over the roof
+  const TT = { x: -2.5, z: -7.6 };
+  add(new T.CylinderGeometry(1.5, 2.3, 17, 10), M.stump, TT.x, 8.5, TT.z, house);
+  for (let i = 0; i < 7; i++) {
+    const a = i * 0.9 + 0.2, root = add(new T.ConeGeometry(1.1, 5.2, 5), M.bark, TT.x + Math.cos(a) * 3.6, 1.6, TT.z + Math.sin(a) * 3.6, house);
+    root.rotation.set(Math.sin(a) * 2.0, 0, -Math.cos(a) * 2.0);
+  }
+  for (const [lx, ly, lz, sc] of [[-2.5, 19.6, -7.6, 5.6], [2.6, 18.6, -5.4, 4.8], [-5.6, 18.2, -3.0, 4.5], [0.6, 19.3, -1.4, 4.6], [-7.2, 17.6, -8.6, 4.2], [3.0, 17.8, -9.6, 4.2]]) {
+    const crown = add(canopyGeo, M.leaves, lx, ly, lz, house);
+    crown.scale.set(sc, sc * 0.75, sc);
+  }
+  block(TH.x + TT.x, TH.z + TT.z, 2.5);
   for (let i = -5; i <= 5; i++) for (const [px, pz, edge] of [[i * 1.17, -5.85, 'back'], [-5.85, i * 1.17, ''], [5.85, i * 1.17, ''], [i * 1.17, 5.85, 'front']]) {
     if (edge === 'front' && Math.abs(px) < 1) continue;                   // gap at the top of the ladder
     if (edge === 'back' && Math.abs(px - 2) < 1) continue;                // gap where the rope bridge lands
@@ -496,14 +579,16 @@ export function buildWorld(scene) {
     tri.setAttribute('normal', new T.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
     add(tri, lam(X.planks, '#d4b088', { side: T.DoubleSide }), 0, top, gz, house);
   }
-  const trapSign = add(new T.PlaneGeometry(3.6, 1.15), new T.MeshBasicMaterial({ map: signTexture('TRAP', { color: '#ff1f1f', outline: '#3a0508' }), transparent: true }), 0, top + 0.95, CZ1 + 0.03, house);
+  // TRAP over HOUSE, painted in red across the gable at a slant
+  const trapSign = add(new T.PlaneGeometry(3.6, 2.25), new T.MeshBasicMaterial({ map: paintedSign(), transparent: true }), 0, top + 1.18, CZ1 + 0.03, house);
   trapSign.renderOrder = 1;
   box(CW * 2 - 0.3, 0.3, 0.3, M.planks, 0, top - 0.15, -1, house);          // tie beam, with a lantern hung from it
   lantern(0, top - 0.45, -1, house);
-  lantern(-(DOOR + 0.9), FY + 3.7, CZ1 + 0.25, house);
-  for (const sx of [-1, 1]) {                                             // side windows
-    const out = add(new T.PlaneGeometry(1.7, 1.7), M.glow, sx * (CW + 0.01), FY + 2.9, -1, house); out.rotation.y = sx * Math.PI / 2;
-    const inn = add(new T.PlaneGeometry(1.7, 1.7), M.daylight, sx * (CW - 0.31), FY + 2.9, -1, house); inn.rotation.y = -sx * Math.PI / 2;
+  lantern(-(DOOR + 0.52), FY + 4.15, CZ1 + 0.3, house);
+  // blacked-out windows, each with a plank nailed across at a slant: two on the front, one on each side
+  for (const sx of [-1, 1]) {
+    boardedWindow(house, sx * 3.0, FY + 2.55, CZ1, 0, sx * 0.5);
+    boardedWindow(house, sx * CW, FY + 2.7, -1, sx * Math.PI / 2, -sx * 0.5);
   }
 
   // ---- inside the Trap House ----
@@ -529,9 +614,9 @@ export function buildWorld(scene) {
   }
   const banner = add(new T.PlaneGeometry(2.6, 1.3), new T.MeshBasicMaterial({ map: signTexture('T1', { w: 128, h: 64, color: '#f5c95b', font: 'bold 54px Georgia', bg: '#7a0f1f' }) }), 0, FY + 3.3, CZ0 + 0.31, house);
   banner.renderOrder = 1;
-  bed(house, 3.4, FY, -0.2, '#b3182c');                                    // bed along the right wall
-  box(0.9, 0.9, 0.9, M.planks, 3.6, FY + 0.45, 1.75, house).rotation.y = 0.2;                // crates and a barrel by the door
-  box(0.7, 0.7, 0.7, M.planks, 2.75, FY + 0.35, 1.9, house).rotation.y = -0.3;
+  bed(house, 3.4, FY, -0.7, '#b3182c');                                    // bed along the right wall (a chest sits at its foot)
+  box(0.9, 0.9, 0.9, M.planks, 4.75, FY + 0.45, 4.7, house).rotation.y = 0.2;                // crates out on the deck, a barrel by the door
+  box(0.7, 0.7, 0.7, M.planks, 3.85, FY + 0.35, 4.95, house).rotation.y = -0.3;
   cyl(0.5, 0.5, 1.1, M.planks, -3.7, FY + 0.55, 1.75, house, 8);
   cyl(0.04, 0.04, 2.3, flat('#30313b'), 1.9, FY + 1.15, -2.5, house, 5);    // mic stand
   cyl(0.3, 0.3, 0.06, flat('#30313b'), 1.9, FY + 0.03, -2.5, house, 8);
@@ -550,9 +635,9 @@ export function buildWorld(scene) {
   piece(-4.2, -2.85, -2.7, 1.5, 0.75);                                    // couch
   piece(-2.35, -0.65, -1.1, -0.1, 0.6);                                   // low table
   piece(-1.7, 1.7, -4.2, -3.1, 1.25);                                     // decks
-  piece(2.65, 4.2, -1.7, 1.3, 0.92);                                      // bed
+  piece(2.65, 4.2, -2.2, 0.8, 0.92);                                      // bed
   wall(-4.0, -2.8, -4.2, -3.1); wall(2.8, 4.0, -4.2, -3.1);               // speakers
-  block(TH.x + 3.6, TH.z + 1.75, 0.65, 4.5, FY + 0.9); block(TH.x + 2.75, TH.z + 1.9, 0.5, 4.5, FY + 0.7);
+  block(TH.x + 4.75, TH.z + 4.7, 0.65, 4.5, FY + 0.9); block(TH.x + 3.85, TH.z + 4.95, 0.5, 4.5, FY + 0.7);
   block(TH.x - 3.7, TH.z + 1.75, 0.6, 4.5, FY + 1.1); block(TH.x + 1.9, TH.z - 2.5, 0.3, 4.5, FY + 2.3);
   interiors.push({ x0: TH.x - CW + 0.3, x1: TH.x + CW - 0.3, z0: TH.z + CZ0 + 0.3, z1: TH.z + CZ1 - 0.3, yMin: 4.5, yMax: top + rise });
 
@@ -570,7 +655,7 @@ export function buildWorld(scene) {
   const facing = (x, z) => Math.atan2(1 - x, 1 - z);
   stumpHome(-25, 7, facing(-25, 7), strawRoof, 1, { rug: '#3f7fa6', blanket: '#e8b84a' });
   stumpHome(-6, 24.5, facing(-6, 24.5), redRoof, 0.92, { rug: '#8a1422', blanket: '#b3182c', flip: -1 });
-  stumpHome(18, 21, facing(18, 21), greenRoof, 1.05, { rug: '#4c8a36', blanket: '#3f7fa6' });
+  const eastHome = stumpHome(18, 21, facing(18, 21), greenRoof, 1.05, { rug: '#4c8a36', blanket: '#3f7fa6' });
 
   // ---------- the Great Trap Tree ----------
   const elder = new T.Group();
@@ -808,5 +893,13 @@ export function buildWorld(scene) {
       && (i.r !== undefined ? Math.hypot(x - i.x, z - i.z) < i.r : x > i.x0 && x < i.x1 && z > i.z0 && z < i.z1));
   }
 
-  return { update, resolve, groundAt, indoors, ladders, surfaces, solids, colliders, interiors, radius: RADIUS, treePos: new T.Vector3(10, 0, -10), spawn: new T.Vector3(1, 0, 1) };
+  // Where the game starts, and where it puts the things ToneDa can use.
+  const inHouse = (lx, lz) => new T.Vector3(TH.x + lx, FY, TH.z + lz);
+  const spots = {
+    pot: { pos: inHouse(-2.3, 1.45) },                                    // flower pot, left of the door
+    vestChest: { pos: inHouse(3.4, 1.4), rotY: -Math.PI / 2 },            // chest at the foot of the bed
+    switchChest: eastHome.userData.nook,                                  // chest in the green-roofed stump home
+  };
+  return { update, resolve, groundAt, indoors, ladders, surfaces, solids, colliders, interiors, spots, radius: RADIUS, treePos: new T.Vector3(10, 0, -10),
+    spawn: inHouse(0, 0.3) };                                             // ToneDa wakes up inside his tree house, facing the door
 }
