@@ -14,6 +14,17 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.4));
 document.body.prepend(renderer.domElement);
 
+// ---------- safety net ----------
+// When the browser's graphics process resets, three.js rebuilds every texture and shader the
+// moment it comes back. If drawing the game is what knocked it over, that repeats until the
+// browser gives up and closes. So stop drawing instead, and offer a reload.
+let halted = false;
+renderer.domElement.addEventListener('webglcontextlost', () => {
+  halted = true;
+  document.getElementById('oops').style.display = 'grid';
+});
+document.getElementById('reload').onclick = () => location.reload();
+
 // ---------- placeholder-shape helpers (the Opps still use these) ----------
 const mat = color => new T.MeshLambertMaterial({ color, flatShading: true });
 const brown = mat('#70472f'), leaf = mat('#34763b');
@@ -163,7 +174,7 @@ addEventListener('pointerup', () => drag = false);
 addEventListener('pointermove', e => { if (drag) { yaw += (e.clientX - px) * 0.006; px = e.clientX; } });
 
 // Handy for debugging from the browser console.
-window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null, get climbing() { return climbing; }, get grounded() { return grounded; } };
+window.game = { toneda, niggy, player, enemies, scene, world, camera, renderer, cam: null, get climbing() { return climbing; }, get grounded() { return grounded; }, get halted() { return halted; } };
 
 // ---------- main loop ----------
 niggy.warpTo(new T.Vector3(world.spawn.x + 1.1, toneda.spec.height - 0.2, world.spawn.z + 0.6));
@@ -171,6 +182,7 @@ const camFrom = new T.Vector3(), camWant = new T.Vector3(), camDir = new T.Vecto
 const clock = new T.Clock();
 const down = (...names) => names.some(n => keys.has(n));
 function frame() {
+  if (halted) return;                             // graphics were lost: stop for good (see the safety net above)
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.05);
   attackCooldown = Math.max(0, attackCooldown - dt);

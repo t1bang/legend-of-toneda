@@ -14,6 +14,7 @@
   #mobile{position:fixed;bottom:10px;display:flex;gap:5px;width:100%;justify-content:space-around}
   #mobile button{font-size:13px;padding:8px}
   @media(pointer:fine){#mobile{display:none}}
+  #oops{position:fixed;inset:0;z-index:10;background:#090a11f2;display:none;place-content:center;text-align:center;padding:20px}
 </style>
 </head>
 <body>
@@ -33,6 +34,11 @@
 <div id="mobile">
   <button data-k="a">◀</button><button data-k="w">▲</button><button data-k="s">▼</button><button data-k="d">▶</button>
   <button data-a="jump">JUMP</button><button data-a="hit">HIT</button><button data-a="talk">TALK</button>
+</div>
+<div id="oops">
+  <h2 style="color:gold">GRAPHICS RESET</h2>
+  <p>Your browser restarted its graphics, so the game stopped to stay safe.</p>
+  <button id="reload">RELOAD GAME</button>
 </div>
 <script type="module" src="./src/game.js"></script>
 </body>

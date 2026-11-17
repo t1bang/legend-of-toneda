@@ -108,7 +108,10 @@ function render() {
 }
 function step(dt) { toneda.update(dt, state()); niggySpot.set(1.5, toneda.spec.height - 0.3, 0.4); niggy.update(dt, niggySpot, camera); if (toneda.variant !== step.last) { step.last = toneda.variant; buttons(); } render(); }
 const clock = new T.Clock();
-(function frame() { requestAnimationFrame(frame); const dt = Math.min(clock.getDelta(), 0.05); if (!view.paused) step(dt); })();
+// If the browser's graphics reset, stop drawing (the same safety net as the game).
+let halted = false;
+renderer.domElement.addEventListener('webglcontextlost', () => { halted = true; document.getElementById('hint').textContent = 'Graphics reset: reload the page to carry on.'; });
+(function frame() { if (halted) return; requestAnimationFrame(frame); const dt = Math.min(clock.getDelta(), 0.05); if (!view.paused) step(dt); })();
 
 // Hooks for automated screenshots.
 window.viewer = { toneda, niggy, view, select, step, render, camera, renderer, scene };
