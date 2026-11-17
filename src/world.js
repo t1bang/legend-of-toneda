@@ -1,7 +1,8 @@
 // Trap Village — an original forest village in the style of late-90s 3D adventures:
 // a sheltered clearing ringed by cliffs and giant trees, dirt paths, stump homes,
-// stilt huts joined by rope bridges, a pond, a market stall, the Trap House and
-// the Great Trap Tree. Everything is built in code with small, soft-filtered textures.
+// treetop huts joined by rope bridges, a pond, a market stall, the Trap House and
+// the Great Trap Tree. Every home is built to ToneDa's scale, with a real doorway
+// and a furnished room inside. Everything is built in code with small, soft-filtered textures.
 import * as T from '../vendor/three.module.min.js';
 
 // ---------- deterministic randomness, so the village is the same every visit ----------
@@ -117,6 +118,55 @@ function textures() {
   return TEX;
 }
 
+// "TRAP / HOUSE" brushed on in red paint, slanted, with drips. The letters are drawn from
+// strokes rather than a font, so the sign looks the same on every phone and computer.
+const BRUSH = {
+  T: [[[0, 0], [1, 0]], [[0.5, 0], [0.5, 1]]],
+  R: [[[0, 1], [0, 0], [0.72, 0], [1, 0.16], [1, 0.36], [0.72, 0.52], [0, 0.52]], [[0.45, 0.52], [1, 1]]],
+  A: [[[0, 1], [0.5, 0], [1, 1]], [[0.22, 0.64], [0.78, 0.64]]],
+  P: [[[0, 1], [0, 0], [0.72, 0], [1, 0.17], [1, 0.38], [0.72, 0.55], [0, 0.55]]],
+  H: [[[0, 0], [0, 1]], [[1, 0], [1, 1]], [[0, 0.5], [1, 0.5]]],
+  O: [[[0.5, 0], [0.16, 0.12], [0, 0.5], [0.16, 0.88], [0.5, 1], [0.84, 0.88], [1, 0.5], [0.84, 0.12], [0.5, 0]]],
+  U: [[[0, 0], [0, 0.7], [0.2, 0.94], [0.5, 1], [0.8, 0.94], [1, 0.7], [1, 0]]],
+  S: [[[1, 0.14], [0.76, 0], [0.26, 0], [0, 0.16], [0.06, 0.38], [0.5, 0.5], [0.94, 0.62], [1, 0.84], [0.74, 1], [0.24, 1], [0, 0.86]]],
+  E: [[[1, 0], [0, 0], [0, 1], [1, 1]], [[0, 0.5], [0.72, 0.5]]],
+};
+function paintedSign() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 320;
+  const g = c.getContext('2d');
+  let seed = 23;
+  const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  g.translate(256, 160); g.rotate(-0.11); g.translate(-256, -160);       // the slant
+  g.lineCap = g.lineJoin = 'round';
+  const word = (text, top, lw, lh, gap, thick) => {
+    let x = 256 - (text.length * lw + (text.length - 1) * gap) / 2;
+    for (const ch of text) {
+      const jx = (r() - 0.5) * 6, jy = (r() - 0.5) * 8;                  // hand-painted: nothing lines up exactly
+      for (const [color, width, off] of [['#6f0810', thick + 6, 2], ['#d6141f', thick, 0], ['#f0303a', thick * 0.35, -2]]) {
+        g.strokeStyle = color; g.lineWidth = width;
+        for (const stroke of BRUSH[ch]) {
+          g.beginPath();
+          stroke.forEach(([u, v], i) => { const px = x + jx + u * lw + off, py = top + jy + v * lh + off; if (i) g.lineTo(px, py); else g.moveTo(px, py); });
+          g.stroke();
+        }
+      }
+      const feet = BRUSH[ch].flat().filter(([, v]) => v > 0.9);         // paint runs from the bottom of a letter
+      if (feet.length && r() < 0.75) {
+        const [u] = feet[Math.floor(r() * feet.length)], dx = x + jx + u * lw;
+        g.strokeStyle = '#d6141f'; g.lineWidth = 5 + r() * 3;
+        g.beginPath(); g.moveTo(dx, top + jy + lh); g.lineTo(dx, top + jy + lh + 12 + r() * 30); g.stroke();
+      }
+      x += lw + gap;
+    }
+  };
+  word('TRAP', 30, 54, 84, 22, 15);
+  word('HOUSE', 172, 62, 100, 20, 16);
+  const t = new T.CanvasTexture(c);
+  t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+
 function signTexture(text, { w = 256, h = 80, color = '#ff2525', font = 'bold 64px monospace', bg = null, outline = null } = {}) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -137,6 +187,7 @@ export function buildWorld(scene) {
   const block = (x, z, radius, yMin = -Infinity, yMax = Infinity) => colliders.push({ x, z, r: radius, yMin, yMax });
   const surfaces = [];                          // things you can stand on above the ground
   const ladders = [];                           // { x, z, face, top, exit: [x, z] }
+  const interiors = [];                         // rooms, so the game can tell when ToneDa is indoors
   const lam = (map, color = '#ffffff', extra = {}) => new T.MeshLambertMaterial({ map, color, ...extra });
   const flat = color => new T.MeshLambertMaterial({ color, flatShading: true });
   const M = {
@@ -144,6 +195,22 @@ export function buildWorld(scene) {
     rock: lam(X.rock, '#ffffff', { flatShading: true }), roof: lam(X.roof), thatch: lam(X.thatch),
     dark: new T.MeshBasicMaterial({ color: '#120b08' }), rope: flat('#8a6a3c'),
   };
+  const bigBark = X.bark.clone(); bigBark.repeat.set(4, 3); bigBark.needsUpdate = true;
+  const floorBoards = X.planks.clone(); floorBoards.repeat.set(3, 3); floorBoards.needsUpdate = true;
+  const roundBoards = X.planks.clone(); roundBoards.repeat.set(5, 1.5); roundBoards.needsUpdate = true;   // planks wrapped round a hut
+  const laid = depth => ({ polygonOffset: true, polygonOffsetFactor: -depth, polygonOffsetUnits: -depth });
+  Object.assign(M, {
+    stump: lam(bigBark),                                              // outside of a stump home
+    carved: lam(bigBark, '#dcb88e', { side: T.BackSide }),            // its hollowed-out inside
+    boardsOut: lam(roundBoards), boardsIn: lam(roundBoards, '#e6c89c', { side: T.BackSide }),   // a plank hut, outside and in
+    cabin: lam(X.planks, '#e8c9a0'), ceiling: lam(X.planks, '#a88a66'),
+    floor: lam(floorBoards, '#ffffff', laid(2)),
+    glow: new T.MeshBasicMaterial({ color: '#ffd978' }), daylight: new T.MeshBasicMaterial({ color: '#d4f0f6' }),
+    fire: new T.MeshBasicMaterial({ color: '#ff8a2c' }),
+    black: flat('#1c1c22'), red: flat('#b3182c'), cream: flat('#efe6d0'), white: flat('#ffffff'), gold: flat('#e8b84a'),
+  });
+  const rug = (color, depth = 4) => new T.MeshLambertMaterial({ color, ...laid(depth) });
+  const lay = (geo, mat, x, y, z, parent) => { const m = add(geo, mat, x, y, z, parent); m.rotation.x = -Math.PI / 2; return m; };
   const add = (geo, mat, x, y, z, parent = scene) => { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); parent.add(m); return m; };
   const box = (w, h, d, mat, x, y, z, parent) => add(new T.BoxGeometry(w, h, d), mat, x, y, z, parent);
   const cyl = (rt, rb, h, mat, x, y, z, parent, seg = 8) => add(new T.CylinderGeometry(rt, rb, h, seg), mat, x, y, z, parent);
@@ -157,7 +224,7 @@ export function buildWorld(scene) {
   scene.add(sun);
 
   // ---------- ground with patchy colour ----------
-  const RADIUS = 34;
+  const RADIUS = 42;
   const groundGeo = new T.PlaneGeometry(150, 150, 30, 30);
   groundGeo.rotateX(-Math.PI / 2);
   const gc = [], gp = groundGeo.attributes.position, tmp = new T.Color();
@@ -171,8 +238,10 @@ export function buildWorld(scene) {
 
   // ---------- dirt paths ----------
   const pathMat = new T.MeshLambertMaterial({ map: X.dirt, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const trail = [];                             // points along every path, so boulders stay off them
   function path(points, width) {
     const curve = new T.CatmullRomCurve3(points.map(([x, z]) => new T.Vector3(x, 0.02, z)));
+    trail.push(...curve.getSpacedPoints(Math.ceil(curve.getLength())));
     const n = Math.max(8, Math.round(curve.getLength() * 1.2)), pos = [], uv = [], idx = [];
     for (let i = 0; i <= n; i++) {
       const p = curve.getPoint(i / n), t = curve.getTangent(i / n), w = width * (0.85 + 0.15 * Math.sin(i * 1.7)) / 2;
@@ -187,13 +256,15 @@ export function buildWorld(scene) {
     g.computeVertexNormals();
     scene.add(new T.Mesh(g, pathMat));
   }
-  path([[-8, -2.5], [-6, 0], [-2, 1.5], [1, 1]], 2.6);                       // Trap House to the plaza
+  path([[-9, -1.2], [-6.5, 0.2], [-2, 1.5], [1, 1]], 2.6);                   // Trap House to the plaza
   path([[1, 1], [4, -2], [6.5, -5.5], [7.8, -7.6]], 2.8);                    // plaza to the Great Trap Tree
   path([[1, 1], [4, 3.5], [7, 5.5]], 2.4);                                   // plaza to the training clearing
-  path([[1, 1], [-3, 5], [-8, 9], [-13, 8.5], [-17, 7]], 2.2);               // plaza past the pond to the west home
-  path([[-3, 5], [-4, 11], [-6, 15]], 2);                                    // spur to the north home
-  path([[1, 1], [0, -6], [-1, -11]], 2.2);                                   // plaza to the market stall
-  path([[7, 5.5], [14, 6], [22, 4], [30, 2.5]], 2.6);                        // clearing to the way out
+  path([[1, 1], [-3, 5], [-8, 9], [-13, 8.5], [-19.6, 6.2]], 2.2);           // plaza past the pond to the west home
+  path([[-3, 5], [-4, 11], [-4.9, 16], [-4.7, 19.4]], 2);                    // spur to the north home
+  path([[1, 1], [1.2, -6], [2, -12.6]], 2.2);                                // plaza to the market stall
+  path([[7, 5.5], [14, 6], [22, 4], [30, 2.6], [38, 2.3]], 2.6);             // clearing to the way out
+  path([[14, 6], [16.2, 11], [15.6, 16.6]], 2);                              // spur to the east home
+  path([[-9, -1.2], [-14.5, -1.4], [-18.5, -5.4], [-21.6, -9.6]], 2);        // Trap House to the treetop ladder
   const plaza = add(new T.CircleGeometry(3.4, 14), pathMat, 1, 0.025, 1);
   plaza.rotation.x = -Math.PI / 2;
 
@@ -239,9 +310,9 @@ export function buildWorld(scene) {
     return g;
   }
   const tints = ['#ffffff', '#e2f0c8', '#cfe8d0', '#f0ffd8'];
-  for (let i = 0; i < 26; i++) {                   // giants standing against the cliff
-    const a = (i / 26) * Math.PI * 2 + (r() - 0.5) * 0.12, d = RADIUS - 2.2 - r() * 2.6;
-    if (Math.abs(a - 0.06) < 0.16 || Math.abs(a - 0.06 - Math.PI * 2) < 0.16) continue;   // leave the way out open
+  for (let i = 0; i < 32; i++) {                   // giants standing against the cliff
+    const a = (i / 32) * Math.PI * 2 + (r() - 0.5) * 0.1, d = RADIUS - 2.2 - r() * 2.6;
+    if (Math.abs(a - 0.055) < 0.14 || Math.abs(a - 0.055 - Math.PI * 2) < 0.14) continue;   // leave the way out open
     tree(Math.cos(a) * d, Math.sin(a) * d, 10 + r() * 5, 1.1 + r() * 0.6, 4.2 + r() * 1.6, tints[i % 4]);
   }
   for (let i = 0; i < 40; i++) {                   // forest canopy on top of the cliff
@@ -249,7 +320,8 @@ export function buildWorld(scene) {
     const c = add(canopyGeo, M.leaves, Math.cos(a) * d, 17 + r() * 4, Math.sin(a) * d);
     c.scale.set(5 + r() * 3, 4 + r() * 2.5, 5 + r() * 3);
   }
-  for (const [x, z, h] of [[-13, -1, 7], [16, -1, 8], [-1, 22, 8], [19, 12, 7.5], [-22, -6, 8.5], [3, -20, 8], [-14, 22, 7.5], [22, -14, 9]]) {
+  for (const [x, z, h] of [[-17.5, 0.5, 7], [16, -1, 8], [3.5, 28, 8], [19, 12, 7.5], [-22, -5.5, 8.5], [7.5, -23, 8], [-15, 22.5, 7.5], [22, -14, 9],
+    [-31, -4, 9], [30, -9, 8.5], [-18, 29, 9], [27, 13, 8], [9, 31, 8.5], [-33, 9, 8], [18, -27, 9]]) {
     tree(x, z, h, 0.7, 3.1, tints[Math.floor(r() * 4)]);
   }
 
@@ -286,90 +358,304 @@ export function buildWorld(scene) {
     add(new T.BoxGeometry(0.28, 0.34, 0.28), new T.MeshBasicMaterial({ color: '#ffd978' }), x, y - 0.1, z, parent);
     box(0.36, 0.06, 0.36, M.dark, x, y + 0.09, z, parent);
   }
-  // a villager home grown out of a giant stump
-  function stumpHome(x, z, faceAngle, roofMat, s = 1) {
+  // ---------- round walls with a real doorway (the door faces the group's +Z) ----------
+  // Two shells: one seen from outside, one from inside. The door frame closes the gap between them.
+  function roundWalls(g, { rB, rT, rIn, h, y = 0, half, doorH, outer, inner }) {
+    const TAU = Math.PI * 2, rAt = t => rB + (rT - rB) * t;       // outer radius at a fraction of the height
+    const gOut = Math.asin(half / rAt(doorH / h / 2)), gIn = Math.asin(half / rIn), over = h - doorH;
+    const shell = (rt, rb, hh, yy, from, len, mat, seg) => add(new T.CylinderGeometry(rt, rb, hh, seg, 1, true, from, len), mat, 0, yy, 0, g);
+    shell(rT, rB, h, y + h / 2, gOut, TAU - 2 * gOut, outer, 18);
+    shell(rIn, rIn, h, y + h / 2, gIn, TAU - 2 * gIn, inner, 18);
+    shell(rT, rAt(doorH / h), over, y + doorH + over / 2, -gOut, 2 * gOut, outer, 3);     // the strip above the door
+    shell(rIn, rIn, over, y + doorH + over / 2, -gIn, 2 * gIn, inner, 3);
+    const zIn = Math.sqrt(rIn * rIn - half * half) - 0.1, zOut = Math.sqrt(rB * rB - half * half) + 0.1, zMid = (zIn + zOut) / 2;
+    for (const sx of [-1, 1]) box(0.3, doorH, zOut - zIn, M.planks, sx * (half + 0.15), y + doorH / 2, zMid, g);
+    box(half * 2 + 0.6, 0.34, zOut - zIn, M.planks, 0, y + doorH + 0.15, zMid, g);
+    return zOut;                                                  // how far out the doorway reaches
+  }
+  // a cone roof whose flat underside is the ceiling of the room below
+  function coneRoof(g, radius, height, y, roofMat, seg = 12) {
+    const roof = add(new T.ConeGeometry(radius, height, seg), [roofMat, roofMat, M.ceiling], 0, y + height / 2, 0, g);
+    roof.rotation.y = 0.3;
+    return roof;
+  }
+  // a round window: glowing from outside, daylight from inside (th is measured from the door)
+  function roundWindow(g, th, y, rOutside, rInside, rad = 0.75) {
+    const sx = Math.sin(th), cz = Math.cos(th);
+    add(new T.CircleGeometry(rad, 10), M.glow, sx * rOutside, y, cz * rOutside, g).rotation.y = th;
+    add(new T.TorusGeometry(rad, 0.09, 5, 12), M.planks, sx * rOutside, y, cz * rOutside, g).rotation.y = th;
+    add(new T.CircleGeometry(rad, 10), M.daylight, sx * rInside, y, cz * rInside, g).rotation.y = th + Math.PI;
+    add(new T.TorusGeometry(rad, 0.08, 5, 12), M.planks, sx * rInside, y, cz * rInside, g).rotation.y = th;
+  }
+  // a blacked-out window with a plank nailed across it at a slant; the same black pane shows inside
+  // (x, y, z) is the centre of the pane on the outside face of a wall `thick` deep; rotY turns it to face out
+  function boardedWindow(parent, x, y, z, rotY, slant = 0.5, thick = 0.3, w = 1.6, h = 1.9) {
+    const win = new T.Group();
+    win.position.set(x, y, z); win.rotation.y = rotY;
+    parent.add(win);
+    const pane = new T.MeshBasicMaterial({ color: '#060608' });
+    add(new T.PlaneGeometry(w, h), pane, 0, 0, 0.012, win);
+    add(new T.PlaneGeometry(w, h), pane, 0, 0, -thick - 0.012, win).rotation.y = Math.PI;
+    for (const sy of [-1, 1]) box(w + 0.3, 0.15, 0.12, M.planks, 0, sy * (h / 2 + 0.07), 0.05, win);       // frame
+    for (const sx of [-1, 1]) box(0.15, h, 0.12, M.planks, sx * (w / 2 + 0.07), 0, 0.05, win);
+    const plank = box(Math.hypot(w, h) * 0.98, 0.34, 0.09, lam(X.planks, '#c9a070'), 0, 0, 0.13, win);
+    plank.rotation.z = slant;
+    for (const e of [-1, 1]) for (const n of [-0.07, 0.07]) {            // nail heads
+      const k = Math.hypot(w, h) * 0.43 * e;
+      box(0.05, 0.05, 0.03, M.black, Math.cos(slant) * k - Math.sin(slant) * n, Math.sin(slant) * k + Math.cos(slant) * n, 0.185, win);
+    }
+    return win;
+  }
+  function bed(g, x, y, z, blanket, rotY = 0) {
+    const b = new T.Group();
+    b.position.set(x, y, z); b.rotation.y = rotY;
+    g.add(b);
+    box(1.5, 0.5, 3.0, M.planks, 0, 0.25, 0, b);
+    box(1.5, 1.3, 0.16, M.planks, 0, 0.65, -1.5, b);              // headboard
+    box(1.36, 0.3, 2.86, M.cream, 0, 0.62, 0, b);
+    box(1.0, 0.22, 0.6, M.white, 0, 0.86, -1.0, b);               // pillow
+    box(1.42, 0.34, 1.9, flat(blanket), 0, 0.64, 0.5, b);
+  }
+
+  // a villager home grown out of a giant stump: walk in through the doorway
+  function stumpHome(x, z, faceAngle, roofMat, s = 1, look = {}) {
     const g = new T.Group();
     g.position.set(x, 0, z); g.rotation.y = faceAngle; g.scale.setScalar(s);
     scene.add(g);
-    cyl(2.0, 2.6, 3.6, M.bark, 0, 1.8, 0, g, 10);
-    const roof = add(new T.ConeGeometry(3.3, 2.8, 10), roofMat, 0, 4.9, 0, g);
-    roof.rotation.y = 0.3;
-    cyl(0.25, 0.3, 1.2, M.rock, 1.1, 5.2, -0.6, g, 6);
-    const door = add(new T.CircleGeometry(0.85, 10, 0, Math.PI), M.dark, 0, 1.25, 2.47, g);
-    door.rotation.x = -0.14;
-    box(1.7, 1.3, 0.1, M.dark, 0, 0.62, 2.52, g).rotation.x = -0.14;
-    box(0.16, 1.5, 0.16, M.planks, -0.95, 0.75, 2.6, g); box(0.16, 1.5, 0.16, M.planks, 0.95, 0.75, 2.6, g);
-    const win = add(new T.CircleGeometry(0.42, 8), new T.MeshBasicMaterial({ color: '#ffd978' }), 1.75, 2.3, 1.5, g);
-    win.rotation.y = 0.86; win.rotation.x = -0.12;
-    box(1.2, 0.12, 0.8, M.planks, 0, 0.06, 3.0, g);
-    lantern(-1.45, 2.4, 2.25, g);
-    block(x, z, 2.7 * s);
+    const W = { rB: 5.0, rT: 4.5, rIn: 4.15, h: 5.4, half: 1.3, doorH: 4.4 }, flip = look.flip || 1;
+    const front = roundWalls(g, { ...W, outer: M.stump, inner: M.carved });
+    coneRoof(g, 6.3, 4.0, W.h - 0.15, roofMat);
+    cyl(0.5, 0.6, 2.6, M.rock, 0, 7.9, -3.3, g, 6);                // chimney, above the hearth
+    for (let i = 0; i < 6; i++) {                                  // roots, leaving the doorway clear
+      const a = Math.PI / 2 + 1.0 + i * (Math.PI * 2 - 2.0) / 5;
+      const root = add(new T.ConeGeometry(0.9, 3.4, 5), M.bark, Math.cos(a) * 6.2, 0.5, Math.sin(a) * 6.2, g);
+      root.rotation.set(Math.sin(a) * 2.0, 0, -Math.cos(a) * 2.0);
+    }
+    box(2.6, 0.12, 1.1, M.planks, 0, 0.06, front + 0.45, g);       // doorstep
+    lantern(-(W.half + 0.85), 3.7, front + 0.2, g);
+    for (const th of [1.05, -1.05]) roundWindow(g, th, 3.0, 4.84, W.rIn * 0.972);
+
+    // ---- the room ----
+    lay(new T.CircleGeometry(W.rIn + 0.5, 18), M.floor, 0, 0.04, 0, g);
+    lay(new T.CircleGeometry(1.8, 14), rug(look.rug || '#8a1422'), 0, 0.06, 0.3, g);
+    lay(new T.RingGeometry(1.4, 1.56, 14), rug('#e8b84a', 6), 0, 0.08, 0.3, g);
+    lantern(0, W.h - 0.9, 0, g);
+    const bx = -1.85 * flip, tx = 2.05 * flip, tz = 0.3, th = 2.5 * flip;
+    bed(g, bx, 0, -1.35, look.blanket || '#b3182c');
+    cyl(0.95, 0.95, 0.12, M.planks, tx, 1.08, tz, g, 10);          // table, a candle, two stools
+    cyl(0.18, 0.26, 1.02, M.bark, tx, 0.51, tz, g, 6);
+    box(0.14, 0.3, 0.14, M.glow, tx, 1.29, tz, g);
+    const stools = [[tx + 1.3 * flip, tz + 0.2], [tx - 0.2 * flip, tz - 1.35]];
+    for (const [sx, sz] of stools) cyl(0.34, 0.3, 0.6, M.planks, sx, 0.3, sz, g, 8);
+    box(1.7, 1.4, 0.9, M.rock, 0, 0.7, -3.5, g);                   // hearth with a fire in it
+    box(1.0, 0.8, 0.2, M.dark, 0, 0.5, -3.06, g);
+    add(new T.ConeGeometry(0.26, 0.6, 5), M.fire, 0, 0.42, -2.98, g);
+    box(1.1, W.h - 1.4, 0.6, M.rock, 0, 1.4 + (W.h - 1.4) / 2, -3.62, g);
+    const shelf = new T.Group();                                   // shelves of jars against the wall
+    shelf.position.set(Math.sin(th) * 3.45, 0, Math.cos(th) * 3.45); shelf.rotation.y = th + Math.PI;
+    g.add(shelf);
+    box(1.7, 2.9, 0.5, M.planks, 0, 1.45, 0, shelf);
+    const jars = ['#b3182c', '#e8b84a', '#3f7fa6', '#4c8a36'];
+    [1.0, 1.85, 2.65].forEach((y, i) => { for (let j = -1; j <= 1; j++) box(0.36, 0.42, 0.3, flat(jars[(i + j + 3) % 4]), j * 0.5, y, 0.18, shelf); });
+
+    // ---- what the player cannot walk through ----
+    const sinF = Math.sin(faceAngle), cosF = Math.cos(faceAngle);
+    const at = (lx, lz) => [x + s * (lx * cosF + lz * sinF), z + s * (-lx * sinF + lz * cosF)];
+    const solid = (lx, lz, rad, top) => block(...at(lx, lz), rad * s, -Infinity, top * s);
+    colliders.push({ ring: true, x, z, rIn: W.rIn * s, rOut: W.rB * s, door: faceAngle, half: W.half * s, yMin: -Infinity, yMax: Infinity });
+    interiors.push({ x, z, r: W.rIn * s, yMin: -1, yMax: W.h * s });
+    solid(bx, -2.0, 0.85, 0.9); solid(bx, -0.7, 0.85, 0.9);
+    solid(tx, tz, 1.0, 1.1);
+    for (const [sx, sz] of stools) solid(sx, sz, 0.4, 0.6);
+    solid(0, -3.4, 1.0, W.h);
+    solid(Math.sin(th) * 3.45, Math.cos(th) * 3.45, 0.85, 2.9);
+    // a clear spot just inside the door, opposite the table, for something worth finding
+    const cx = -2.3 * flip, cz = 1.75, [wx, wz] = at(cx, cz);
+    g.userData.nook = { pos: new T.Vector3(wx, 0, wz), rotY: faceAngle + Math.atan2(-cx, -cz) };
     return g;
   }
-  // a hut on a platform high in a tree
-  function stiltHut(x, z, y, roofMat) {
+
+  // a round hut on a platform at the top of a tree trunk, reached by ladder or rope bridge
+  // gaps: directions [dx, dz] in which the railing is left open
+  function stiltHut(x, z, y, roofMat, gaps = [], look = {}) {
     const g = new T.Group();
     g.position.set(x, 0, z);
     scene.add(g);
-    cyl(1.0, 1.5, y + 7, M.bark, 0, (y + 7) / 2, 0, g, 8);
-    cyl(3.2, 3.2, 0.3, M.planks, 0, y, 0, g, 10);
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2;
-      box(0.1, 0.9, 0.1, M.planks, Math.cos(a) * 3.05, y + 0.6, Math.sin(a) * 3.05, g);
+    const fy = y + 0.15, W = { rB: 4.3, rT: 4.3, rIn: 3.85, h: 4.6, half: 1.2, doorH: 4.2 }, PR = 6;
+    cyl(1.5, 2.2, y, M.bark, 0, y / 2, 0, g, 9);
+    for (let i = 0; i < 5; i++) {
+      const a = i * 1.257 + 0.4, root = add(new T.ConeGeometry(0.9, 4.4, 5), M.bark, Math.cos(a) * 3.2, 1.3, Math.sin(a) * 3.2, g);
+      root.rotation.set(Math.sin(a) * 2.0, 0, -Math.cos(a) * 2.0);
     }
-    cyl(1.9, 2.0, 2.3, M.planks, 0, y + 1.3, 0, g, 9);
-    add(new T.ConeGeometry(2.7, 1.9, 9), roofMat, 0, y + 3.4, 0, g);
-    box(0.9, 1.4, 0.1, M.dark, 0, y + 0.95, 2.0, g);
-    const c = add(canopyGeo, M.leaves, 0, y + 9, 0, g);
-    c.scale.set(5.5, 3.8, 5.5);
-    block(x, z, 1.7, -Infinity, y - 0.5);        // the trunk below
-    block(x, z, 2.2, y - 0.5);                   // the hut itself, up on the platform
-    surfaces.push({ type: 'disc', x, z, r: 3.2, y: y + 0.15 });
+    cyl(PR, PR, 0.3, M.planks, 0, y, 0, g, 16);
+    for (let i = 0; i < 6; i++) {                                  // struts under the platform
+      const a = (i / 6) * Math.PI * 2 + 0.3, strut = box(0.26, 4.6, 0.26, M.bark, Math.cos(a) * 3.0, y - 1.95, Math.sin(a) * 3.0, g);
+      strut.rotation.set(Math.sin(a) * 0.72, 0, -Math.cos(a) * 0.72);
+    }
+    const open = gaps.map(([dx, dz]) => Math.atan2(dz, dx));
+    for (let i = 0; i < 20; i++) {                                 // railing posts, open at the ladder and the bridges
+      const a = (i / 20) * Math.PI * 2;
+      if (open.some(o => Math.abs(Math.atan2(Math.sin(a - o), Math.cos(a - o))) < 0.3)) continue;
+      box(0.12, 1.0, 0.12, M.planks, Math.cos(a) * (PR - 0.15), fy + 0.5, Math.sin(a) * (PR - 0.15), g);
+    }
+    roundWalls(g, { ...W, y: fy, outer: M.boardsOut, inner: M.boardsIn });
+    coneRoof(g, 5.5, 3.3, fy + W.h - 0.15, roofMat, 10);
+    for (const [lx, ly, lz, sc] of [[-3.4, 8.0, -2.4, 3.4], [3.4, 7.8, -2.6, 3.3], [0.2, 9.4, -1.6, 3.6], [0.3, 7.4, -4.6, 3.2]]) {
+      const c = add(canopyGeo, M.leaves, lx, fy + ly, lz, g);      // the tree's crown, grown round the roof
+      c.scale.set(sc, sc * 0.75, sc);
+    }
+    for (const th of [1.15, -1.15]) roundWindow(g, th, fy + 2.7, W.rB + 0.04, W.rIn * 0.972, 0.65);
+    lantern(-(W.half + 0.8), fy + 3.6, W.rB + 0.25, g);
+
+    // ---- the room ----
+    lay(new T.CircleGeometry(1.5, 12), rug(look.rug || '#3f7fa6'), 0, fy + 0.03, 0.2, g);
+    lantern(0, fy + W.h - 0.38, 0, g);                             // high enough for OG ToneDa to walk under
+    box(1.3, 0.3, 2.7, flat(look.blanket || '#e8b84a'), -2.0, fy + 0.15, -1.1, g);     // bedroll and pillow
+    box(0.9, 0.24, 0.55, M.white, -2.0, fy + 0.36, -2.1, g);
+    box(1.0, 1.0, 1.0, M.planks, 2.2, fy + 0.5, -1.4, g).rotation.y = 0.3;             // crates and a barrel
+    box(0.7, 0.7, 0.7, M.planks, 2.25, fy + 1.35, -1.4, g).rotation.y = -0.2;
+    cyl(0.5, 0.5, 1.1, M.planks, 0.9, fy + 0.55, -2.9, g, 8);
+
+    block(x, z, 2.4, -Infinity, y - 0.5);                          // the trunk below
+    colliders.push({ ring: true, x, z, rIn: W.rIn, rOut: W.rB, door: 0, half: W.half, yMin: y - 0.5, yMax: Infinity });
+    interiors.push({ x, z, r: W.rIn, yMin: y - 0.5, yMax: fy + W.h });
+    block(x - 2.0, z - 1.6, 0.75, y - 0.5, fy + 0.3); block(x - 2.0, z - 0.5, 0.75, y - 0.5, fy + 0.3);
+    block(x + 2.2, z - 1.4, 0.8, y - 0.5, fy + 2);
+    block(x + 0.9, z - 2.9, 0.6, y - 0.5, fy + 1.1);
+    surfaces.push({ type: 'disc', x, z, r: PR, y: fy });
     return g;
   }
 
-  // ---------- the Trap House ----------
+  // ---------- the Trap House: ToneDa's tree house, a big cabin on a deck against a giant tree ----------
+  // Platform 12 x 12 with its floor at y = 5.2. The cabin sits toward the back, leaving a deck in front.
+  const TH = { x: -9, z: -8.5 }, FY = 5.2;
   const house = new T.Group();
-  house.position.set(-8, 0, -7);
+  house.position.set(TH.x, 0, TH.z);
   scene.add(house);
-  for (const x of [-2.6, 2.6]) for (const z of [-2.6, 2.6]) { cyl(0.32, 0.4, 5, M.bark, x, 2.5, z, house, 7); block(-8 + x, -7 + z, 0.6, -Infinity, 4.5); }
-  box(7, 0.4, 7, M.planks, 0, 5, 0, house);
-  for (let i = -3; i <= 3; i++) for (const [x, z, front] of [[i * 1.1, -3.35, false], [-3.35, i * 1.1, false], [3.35, i * 1.1, false], [i * 1.1, 3.35, true]]) {
-    if (front && Math.abs(i) < 1) continue;                               // gap at the top of the ladder
-    box(0.12, 1.0, 0.12, M.planks, x, 5.7, z, house);
+  for (const px of [-5.2, 0, 5.2]) for (const pz of [-5.2, 0, 5.2]) {
+    if (!px && !pz) continue;
+    cyl(0.4, 0.5, 5, M.bark, px, 2.5, pz, house, 7);
+    block(TH.x + px, TH.z + pz, 0.7, -Infinity, 4.5);
   }
-  for (const [w, d, x, z] of [[7, 0.1, 0, -3.35], [0.1, 7, -3.35, 0], [0.1, 7, 3.35, 0], [2.6, 0.1, -2.2, 3.35], [2.6, 0.1, 2.2, 3.35]]) box(w, 0.1, d, M.planks, x, 6.2, z, house);
-  box(5, 3, 4, lam(X.planks, '#e8c9a0'), 0, 6.7, -0.5, house);
-  for (const side of [1, -1]) {                                           // pitched red roof
-    const slope = box(5.8, 0.22, 3.0, M.roof, 0, 9.0, -0.5 + side * 1.2, house);
-    slope.rotation.x = side * 0.62;
+  box(12, 0.4, 12, M.planks, 0, 5, 0, house);
+  // the giant tree it is built against: trunk behind the cabin, crown spread over the roof
+  const TT = { x: -2.5, z: -7.6 };
+  add(new T.CylinderGeometry(1.5, 2.3, 17, 10), M.stump, TT.x, 8.5, TT.z, house);
+  for (let i = 0; i < 7; i++) {
+    const a = i * 0.9 + 0.2, root = add(new T.ConeGeometry(1.1, 5.2, 5), M.bark, TT.x + Math.cos(a) * 3.6, 1.6, TT.z + Math.sin(a) * 3.6, house);
+    root.rotation.set(Math.sin(a) * 2.0, 0, -Math.cos(a) * 2.0);
   }
-  box(5.9, 0.3, 0.3, flat('#7a0f1f'), 0, 9.85, -0.5, house);
-  for (const sx of [-2.5, 2.5]) {                                         // gable ends
-    const tri = new T.Shape(); tri.moveTo(-2, 0); tri.lineTo(2, 0); tri.lineTo(0, 1.65); tri.closePath();
-    const gable = add(new T.ShapeGeometry(tri), lam(X.planks, '#d4b088', { side: T.DoubleSide }), sx, 8.2, -0.5, house);
-    gable.rotation.y = Math.PI / 2;
+  for (const [lx, ly, lz, sc] of [[-2.5, 19.6, -7.6, 5.6], [2.6, 18.6, -5.4, 4.8], [-5.6, 18.2, -3.0, 4.5], [0.6, 19.3, -1.4, 4.6], [-7.2, 17.6, -8.6, 4.2], [3.0, 17.8, -9.6, 4.2]]) {
+    const crown = add(canopyGeo, M.leaves, lx, ly, lz, house);
+    crown.scale.set(sc, sc * 0.75, sc);
   }
-  box(1.1, 1.9, 0.1, M.dark, 0, 6.15, 1.52, house);                       // door
-  const trapSign = add(new T.PlaneGeometry(4.4, 1.4), new T.MeshBasicMaterial({ map: signTexture('TRAP', { color: '#ff1f1f', outline: '#3a0508' }), transparent: true }), 0, 7.7, 1.53, house);
+  block(TH.x + TT.x, TH.z + TT.z, 2.5);
+  for (let i = -5; i <= 5; i++) for (const [px, pz, edge] of [[i * 1.17, -5.85, 'back'], [-5.85, i * 1.17, ''], [5.85, i * 1.17, ''], [i * 1.17, 5.85, 'front']]) {
+    if (edge === 'front' && Math.abs(px) < 1) continue;                   // gap at the top of the ladder
+    if (edge === 'back' && Math.abs(px - 2) < 1) continue;                // gap where the rope bridge lands
+    box(0.12, 1.0, 0.12, M.planks, px, 5.7, pz, house);
+  }
+  for (const [w, d, px, pz] of [[6.85, 0.1, -2.42, -5.85], [2.85, 0.1, 4.42, -5.85], [0.1, 11.7, -5.85, 0], [0.1, 11.7, 5.85, 0], [4.85, 0.1, -3.42, 5.85], [4.85, 0.1, 3.42, 5.85]]) {
+    box(w, 0.1, d, M.planks, px, 6.2, pz, house);
+  }
+  // the cabin: 9 wide, 7 deep, walls 4.8 high, centred at z = -1 on the platform
+  const CW = 4.5, CZ0 = -4.5, CZ1 = 2.5, WH = 4.8, DOOR = 1.3, DOORH = 4.4, wy = FY + WH / 2;
+  box(CW * 2, WH, 0.3, M.cabin, 0, wy, CZ0 + 0.15, house);                                   // back wall
+  for (const sx of [-1, 1]) box(0.3, WH, CZ1 - CZ0, M.cabin, sx * (CW - 0.15), wy, -1, house);   // side walls
+  for (const sx of [-1, 1]) box(CW - DOOR, WH, 0.3, M.cabin, sx * (CW + DOOR) / 2, wy, CZ1 - 0.15, house);   // front, either side of the door
+  box(DOOR * 2, WH - DOORH, 0.3, M.cabin, 0, FY + DOORH + (WH - DOORH) / 2, CZ1 - 0.15, house);
+  for (const sx of [-1, 1]) box(0.3, DOORH, 0.56, M.planks, sx * (DOOR + 0.15), FY + DOORH / 2, CZ1 - 0.15, house);   // door frame
+  box(DOOR * 2 + 0.6, 0.34, 0.56, M.planks, 0, FY + DOORH + 0.15, CZ1 - 0.15, house);
+  const rise = 3.0, over = 0.7, top = FY + WH, slopeLen = Math.hypot(CW + over, (CW + over) * rise / CW);
+  for (const sx of [-1, 1]) {                                             // pitched red roof, ridge running front to back
+    const slope = box(slopeLen, 0.25, CZ1 - CZ0 + 1.2, M.roof, sx * (CW + over) / 2, top + rise - (CW + over) / 2 * rise / CW, -1, house);
+    slope.rotation.z = -sx * Math.atan2(rise, CW);
+  }
+  box(0.36, 0.36, CZ1 - CZ0 + 1.4, flat('#7a0f1f'), 0, top + rise + 0.08, -1, house);
+  for (const gz of [CZ1, CZ0]) {                                          // gable ends
+    const tri = new T.BufferGeometry();
+    tri.setAttribute('position', new T.Float32BufferAttribute([-CW, 0, 0, CW, 0, 0, 0, rise, 0], 3));
+    tri.setAttribute('uv', new T.Float32BufferAttribute([0, 0, 1, 0, 0.5, 0.62], 2));
+    tri.setAttribute('normal', new T.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+    add(tri, lam(X.planks, '#d4b088', { side: T.DoubleSide }), 0, top, gz, house);
+  }
+  // TRAP over HOUSE, painted in red across the gable at a slant
+  const trapSign = add(new T.PlaneGeometry(3.6, 2.25), new T.MeshBasicMaterial({ map: paintedSign(), transparent: true }), 0, top + 1.18, CZ1 + 0.03, house);
   trapSign.renderOrder = 1;
-  ladder(0, 3.9, 5.2, Math.PI, house, { x: -8, z: -2.75, face: Math.PI, top: 5.2, exit: [-8, -4.5] });
-  surfaces.push({ type: 'rect', x0: -11.5, x1: -4.5, z0: -10.5, z1: -3.5, y: 5.2 });
-  colliders.push({ box: true, x0: -10.5, x1: -5.5, z0: -9.5, z1: -5.5, yMin: 4.5, yMax: Infinity });   // the cabin
-  lantern(-2.2, 7.2, 1.7, house);
+  box(CW * 2 - 0.3, 0.3, 0.3, M.planks, 0, top - 0.15, -1, house);          // tie beam, with a lantern hung from it
+  lantern(0, top - 0.45, -1, house);
+  lantern(-(DOOR + 0.52), FY + 4.15, CZ1 + 0.3, house);
+  // blacked-out windows, each with a plank nailed across at a slant: two on the front, one on each side
+  for (const sx of [-1, 1]) {
+    boardedWindow(house, sx * 3.0, FY + 2.55, CZ1, 0, sx * 0.5);
+    boardedWindow(house, sx * CW, FY + 2.7, -1, sx * Math.PI / 2, -sx * 0.5);
+  }
 
-  // ---------- stilt huts and rope bridges ----------
+  // ---- inside the Trap House ----
+  lay(new T.PlaneGeometry(4.6, 3.4), rug('#e8b84a', 3), 0, FY + 0.02, -0.7, house);
+  lay(new T.PlaneGeometry(4.2, 3.0), rug('#8a1422', 5), 0, FY + 0.03, -0.7, house);
+  box(1.3, 0.75, 3.6, M.black, -3.5, FY + 0.375, -0.6, house);              // couch along the left wall
+  box(0.4, 1.7, 3.6, M.black, -3.98, FY + 0.85, -0.6, house);
+  for (const dz of [-1.9, 1.9]) box(1.3, 1.1, 0.4, M.black, -3.5, FY + 0.55, -0.6 + dz, house);
+  for (const dz of [-0.85, 0.85]) box(0.95, 0.3, 1.5, M.red, -3.4, FY + 0.9, -0.6 + dz, house);
+  box(1.7, 0.6, 1.0, lam(X.planks, '#8a6a48'), -1.5, FY + 0.3, -0.6, house);                 // low table
+  const desk = lam(X.planks, '#7a5a3a');
+  box(3.4, 1.25, 1.0, desk, 0, FY + 0.625, -3.6, house);                    // the decks: two platters and a mixer
+  for (const sx of [-1, 1]) {
+    cyl(0.45, 0.45, 0.06, M.black, sx * 0.95, FY + 1.28, -3.6, house, 12);
+    cyl(0.15, 0.15, 0.07, M.red, sx * 0.95, FY + 1.285, -3.6, house, 8);
+  }
+  box(0.7, 0.12, 0.62, flat('#30313b'), 0, FY + 1.31, -3.6, house);
+  for (const sx of [-1, 1]) {                                             // speaker stacks in the back corners
+    box(1.2, 2.8, 1.0, M.black, sx * 3.4, FY + 1.4, -3.6, house);
+    add(new T.CircleGeometry(0.42, 12), new T.MeshBasicMaterial({ color: '#3a3a44' }), sx * 3.4, FY + 0.85, -3.09, house);
+    add(new T.RingGeometry(0.42, 0.5, 12), M.gold, sx * 3.4, FY + 0.85, -3.085, house);
+    add(new T.CircleGeometry(0.2, 10), new T.MeshBasicMaterial({ color: '#3a3a44' }), sx * 3.4, FY + 2.05, -3.09, house);
+  }
+  const banner = add(new T.PlaneGeometry(2.6, 1.3), new T.MeshBasicMaterial({ map: signTexture('T1', { w: 128, h: 64, color: '#f5c95b', font: 'bold 54px Georgia', bg: '#7a0f1f' }) }), 0, FY + 3.3, CZ0 + 0.31, house);
+  banner.renderOrder = 1;
+  bed(house, 3.4, FY, -0.7, '#b3182c');                                    // bed along the right wall (a chest sits at its foot)
+  box(0.9, 0.9, 0.9, M.planks, 4.75, FY + 0.45, 4.7, house).rotation.y = 0.2;                // crates out on the deck, a barrel by the door
+  box(0.7, 0.7, 0.7, M.planks, 3.85, FY + 0.35, 4.95, house).rotation.y = -0.3;
+  cyl(0.5, 0.5, 1.1, M.planks, -3.7, FY + 0.55, 1.75, house, 8);
+  cyl(0.04, 0.04, 2.3, flat('#30313b'), 1.9, FY + 1.15, -2.5, house, 5);    // mic stand
+  cyl(0.3, 0.3, 0.06, flat('#30313b'), 1.9, FY + 0.03, -2.5, house, 8);
+  add(new T.SphereGeometry(0.13, 6, 5), M.black, 1.9, FY + 2.35, -2.5, house);
+
+  ladder(0, 6.4, FY, Math.PI, house, { x: TH.x, z: TH.z + 6.75, face: Math.PI, top: FY, exit: [TH.x, TH.z + 5] });
+  surfaces.push({ type: 'rect', x0: TH.x - 6, x1: TH.x + 6, z0: TH.z - 6, z1: TH.z + 6, y: FY });
+  // walls, then furniture (each can be stood on if you jump up)
+  const wall = (x0, x1, z0, z1, yMax = Infinity) => colliders.push({ box: true, x0: TH.x + x0, x1: TH.x + x1, z0: TH.z + z0, z1: TH.z + z1, yMin: 4.5, yMax });
+  wall(-CW, CW, CZ0, CZ0 + 0.3); wall(-CW, -CW + 0.3, CZ0, CZ1); wall(CW - 0.3, CW, CZ0, CZ1);
+  wall(-CW, -DOOR, CZ1 - 0.3, CZ1); wall(DOOR, CW, CZ1 - 0.3, CZ1);
+  const piece = (x0, x1, z0, z1, h) => {
+    wall(x0, x1, z0, z1, FY + h - 0.05);
+    surfaces.push({ type: 'rect', x0: TH.x + x0, x1: TH.x + x1, z0: TH.z + z0, z1: TH.z + z1, y: FY + h });
+  };
+  piece(-4.2, -2.85, -2.7, 1.5, 0.75);                                    // couch
+  piece(-2.35, -0.65, -1.1, -0.1, 0.6);                                   // low table
+  piece(-1.7, 1.7, -4.2, -3.1, 1.25);                                     // decks
+  piece(2.65, 4.2, -2.2, 0.8, 0.92);                                      // bed
+  wall(-4.0, -2.8, -4.2, -3.1); wall(2.8, 4.0, -4.2, -3.1);               // speakers
+  block(TH.x + 4.75, TH.z + 4.7, 0.65, 4.5, FY + 0.9); block(TH.x + 3.85, TH.z + 4.95, 0.5, 4.5, FY + 0.7);
+  block(TH.x - 3.7, TH.z + 1.75, 0.6, 4.5, FY + 1.1); block(TH.x + 1.9, TH.z - 2.5, 0.3, 4.5, FY + 2.3);
+  interiors.push({ x0: TH.x - CW + 0.3, x1: TH.x + CW - 0.3, z0: TH.z + CZ0 + 0.3, z1: TH.z + CZ1 - 0.3, yMin: 4.5, yMax: top + rise });
+
+  // ---------- treetop huts and rope bridges ----------
   const redRoof = M.roof, greenRoof = lam(X.leaves, '#b8d890'), strawRoof = M.thatch;
-  stiltHut(-21, -17, 5, strawRoof);
-  stiltHut(-10, -22, 5, greenRoof);
-  ropeBridge([-18.3, -18.2], [-12.9, -20.8], 5.1);
-  ropeBridge([-9.6, -18.9], [-8.4, -10.5], 5.1);
-  ladder(-21, -13.7, 5.1, Math.PI, scene, { x: -21, z: -13.35, face: Math.PI, top: 5.15, exit: [-21, -15] });
+  const H1 = [-22, -17], H2 = [-7, -26], toward = (a, b, d) => { const k = d / Math.hypot(b[0] - a[0], b[1] - a[1]); return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]; };
+  const landing = [TH.x + 2, TH.z - 5.9];                                 // where the bridge meets the Trap House platform
+  stiltHut(...H1, 5, strawRoof, [[0, 1], [H2[0] - H1[0], H2[1] - H1[1]]], { rug: '#3f7fa6', blanket: '#e8b84a' });
+  stiltHut(...H2, 5, greenRoof, [[0, 1], [H1[0] - H2[0], H1[1] - H2[1]]], { rug: '#8a1422', blanket: '#4c8a36' });
+  ropeBridge(toward(H1, H2, 5.85), toward(H2, H1, 5.85), 5.1);
+  ropeBridge([H2[0], H2[1] + 5.85], landing, 5.1);
+  ladder(H1[0], H1[1] + 6.4, 5.1, Math.PI, scene, { x: H1[0], z: H1[1] + 6.75, face: Math.PI, top: 5.15, exit: [H1[0], H1[1] + 5] });
 
-  // ---------- stump homes ----------
-  stumpHome(-19, 6, Math.atan2(1 + 19, 1 - 6), strawRoof);
-  stumpHome(-7, 19, Math.atan2(1 + 7, 1 - 19), redRoof, 0.92);
-  stumpHome(17, 19, Math.atan2(1 - 17, 1 - 19), greenRoof, 1.05);
+  // ---------- stump homes, each with its door turned toward the plaza ----------
+  const facing = (x, z) => Math.atan2(1 - x, 1 - z);
+  stumpHome(-25, 7, facing(-25, 7), strawRoof, 1, { rug: '#3f7fa6', blanket: '#e8b84a' });
+  stumpHome(-6, 24.5, facing(-6, 24.5), redRoof, 0.92, { rug: '#8a1422', blanket: '#b3182c', flip: -1 });
+  const eastHome = stumpHome(18, 21, facing(18, 21), greenRoof, 1.05, { rug: '#4c8a36', blanket: '#3f7fa6' });
 
   // ---------- the Great Trap Tree ----------
   const elder = new T.Group();
@@ -383,7 +669,6 @@ export function buildWorld(scene) {
     tp.setX(i, tp.getX(i) * k); tp.setZ(i, tp.getZ(i) * k);
   }
   trunkGeo.computeVertexNormals();
-  const bigBark = X.bark.clone(); bigBark.repeat.set(4, 3); bigBark.needsUpdate = true;
   add(trunkGeo, lam(bigBark), 0, 7.5, 0, elder);
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + 0.2, root = add(new T.ConeGeometry(1.2, 5, 6), M.bark, Math.cos(a) * 4.9, 1.35, Math.sin(a) * 4.9, elder);
@@ -432,7 +717,7 @@ export function buildWorld(scene) {
 
   // ---------- market stall ----------
   const stall = new T.Group();
-  stall.position.set(-1, 0, -13.5);
+  stall.position.set(2, 0, -16);
   scene.add(stall);
   box(4, 1, 1.4, M.planks, 0, 0.5, 0, stall);
   for (const x of [-2, 2]) for (const z of [-0.9, 0.9]) box(0.16, 3, 0.16, M.planks, x, 1.5, z, stall);
@@ -442,7 +727,7 @@ export function buildWorld(scene) {
   t1.renderOrder = 1;
   for (const [x, z, s] of [[2.9, 0.5, 0.9], [3.2, -0.5, 0.7], [-2.9, 0.3, 0.8]]) box(s, s, s, M.planks, x, s / 2, z, stall).rotation.y = r();
   cyl(0.45, 0.45, 1, M.planks, -3.1, 0.5, -0.8, stall, 8);
-  block(-1, -13.5, 2.3); block(2, -13.4, 0.9); block(-4, -13.6, 0.9);
+  block(2, -16, 2.3); block(5, -15.9, 0.9); block(-1, -16.1, 0.9);
 
   // ---------- training clearing: a fence arc and a signpost ----------
   const ring = { x: 8, z: 6, r: 7.5 };
@@ -467,7 +752,7 @@ export function buildWorld(scene) {
   }
   signpost(4.2, 4.6, 'TRAINING', -0.6);
   signpost(5.2, -3.2, 'GREAT TREE', 0.5);
-  signpost(26, 4.6, 'WOODS', -1.5);
+  signpost(34, 4.8, 'WOODS', -1.5);
 
   // ---------- the way out: a hollow log through the cliff ----------
   const log = add(new T.CylinderGeometry(3.2, 3.4, 9, 12, 1, true), lam(bigBark, '#ffffff', { side: T.DoubleSide }), RADIUS + 2, 2.6, 2.2);
@@ -476,7 +761,9 @@ export function buildWorld(scene) {
   hole.rotation.y = -Math.PI / 2;
 
   // ---------- scattered grass tufts, flowers and rocks ----------
-  const clear = (x, z) => colliders.every(c => c.box || Math.hypot(c.x - x, c.z - z) > c.r + 0.4) && Math.hypot(x - pond.x, z - pond.z) > pond.r + 0.3;
+  // nothing grows inside a home, on its doorstep, or in the pond
+  const clear = (x, z) => colliders.every(c => c.box || (c.ring ? c.yMin > 0 || Math.hypot(c.x - x, c.z - z) > c.rOut + 1.6 : Math.hypot(c.x - x, c.z - z) > c.r + 0.4))
+    && Math.hypot(x - pond.x, z - pond.z) > pond.r + 0.3;
   function scatter(count, map, w, h) {
     const quad = new T.PlaneGeometry(w, h); quad.translate(0, h / 2, 0);
     const other = quad.clone(); other.rotateY(Math.PI / 2);
@@ -497,11 +784,11 @@ export function buildWorld(scene) {
     }
     scene.add(mesh);
   }
-  scatter(420, X.tuft, 0.9, 0.7);
-  scatter(110, X.flower, 0.8, 0.6);
-  for (let i = 0; i < 16; i++) {
+  scatter(620, X.tuft, 0.9, 0.7);
+  scatter(160, X.flower, 0.8, 0.6);
+  for (let i = 0; i < 24; i++) {
     const a = r() * 6.28, d = 8 + r() * (RADIUS - 11), x = Math.cos(a) * d, z = Math.sin(a) * d, s = 0.5 + r() * 0.8;
-    if (!clear(x, z) || Math.hypot(x - ring.x, z - ring.z) < ring.r) continue;
+    if (!clear(x, z) || Math.hypot(x - ring.x, z - ring.z) < ring.r || trail.some(p => Math.hypot(p.x - x, p.z - z) < s + 2)) continue;
     const stone = add(new T.DodecahedronGeometry(s, 0), M.rock, x, s * 0.45, z);
     stone.rotation.set(r() * 3, r() * 3, r() * 3);
     block(x, z, s * 0.85);
@@ -533,6 +820,53 @@ export function buildWorld(scene) {
     if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) > 1.2) solids.push(o);
   });
 
+  // ---------- draw the village in a few big pieces ----------
+  // The village is well over a thousand small meshes. Handing them to the graphics card one at a
+  // time is slow, most of all on a phone, so every piece that shares a look is welded into one
+  // mesh for drawing. The small pieces stay where they are, unseen, so the camera and the
+  // Switch's shots still collide with them exactly as before.
+  scene.updateMatrixWorld(true);
+  const unseen = {}, welds = new Map(), vert = new T.Vector3(), turn = new T.Matrix3();
+  const lookOf = m => [m.type, m.color.getHexString(), m.map ? m.map.uuid : 0, m.side, m.flatShading, m.transparent, m.opacity, m.alphaTest, m.depthWrite,
+    m.polygonOffset ? m.polygonOffsetFactor : 0].join();
+  const hide = m => unseen[m.side] || (unseen[m.side] = new T.MeshBasicMaterial({ visible: false, side: m.side }));
+  scene.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some(m => m.vertexColors || !m.color)) return;       // the ground and the cliff keep their own shading
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv;
+    turn.getNormalMatrix(o.matrixWorld);
+    const parts = Array.isArray(o.material) ? g.groups : [{ start: 0, count: P.count, materialIndex: 0 }];
+    for (const part of parts) {
+      const m = mats[part.materialIndex], key = lookOf(m) + '/' + o.renderOrder;
+      let w = welds.get(key);
+      if (!w) welds.set(key, w = { material: m, renderOrder: o.renderOrder, pos: [], nor: [], uv: [] });
+      for (let i = part.start; i < part.start + part.count; i++) {
+        vert.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); w.pos.push(vert.x, vert.y, vert.z);
+        vert.fromBufferAttribute(N, i).applyMatrix3(turn).normalize(); w.nor.push(vert.x, vert.y, vert.z);
+        w.uv.push(U ? U.getX(i) : 0, U ? U.getY(i) : 0);
+      }
+    }
+    // out of the drawing, but still there to be hit (a mesh that carries others keeps them showing)
+    if (o.children.length) o.material = Array.isArray(o.material) ? mats.map(hide) : hide(o.material);
+    else o.visible = false;
+  });
+  for (const w of welds.values()) {
+    const g = new T.BufferGeometry();
+    g.setAttribute('position', new T.Float32BufferAttribute(w.pos, 3));
+    g.setAttribute('normal', new T.Float32BufferAttribute(w.nor, 3));
+    g.setAttribute('uv', new T.Float32BufferAttribute(w.uv, 2));
+    const mesh = new T.Mesh(g, w.material);
+    mesh.renderOrder = w.renderOrder;
+    scene.add(mesh);
+  }
+
+  // Nothing in the village moves, so its transforms are worked out once here, not every frame.
+  // (Anything added to the scene later, like ToneDa, Niggy and the Opps, still moves as normal.)
+  scene.traverse(o => { if (o !== scene) o.matrixAutoUpdate = false; });
+
   let time = 0;
   function update(dt) {
     time += dt;
@@ -550,6 +884,20 @@ export function buildWorld(scene) {
   function resolve(pos, radius = 0.45) {
     for (const c of colliders) {
       if (pos.y < c.yMin || pos.y > c.yMax) continue;
+      if (c.ring) {                               // a round wall with a doorway
+        const dx = pos.x - c.x, dz = pos.z - c.z, d = Math.hypot(dx, dz);
+        if (d >= c.rOut + radius || d <= c.rIn - radius) continue;
+        const ax = Math.sin(c.door), az = Math.cos(c.door);                 // which way the door faces
+        const along = dx * ax + dz * az, side = dx * az - dz * ax;
+        if (along > 0 && Math.abs(side) < c.half) {                         // in the doorway: only the door posts push back
+          const k = Math.sign(side) * Math.min(Math.abs(side), Math.max(0, c.half - radius)) - side;
+          pos.x += az * k; pos.z -= ax * k;
+          continue;
+        }
+        const to = d > (c.rIn + c.rOut) / 2 ? c.rOut + radius : c.rIn - radius;
+        if (d > 1e-4) { pos.x = c.x + dx / d * to; pos.z = c.z + dz / d * to; }
+        continue;
+      }
       if (c.box) {
         const x0 = c.x0 - radius, x1 = c.x1 + radius, z0 = c.z0 - radius, z1 = c.z1 + radius;
         if (pos.x <= x0 || pos.x >= x1 || pos.z <= z0 || pos.z >= z1) continue;
@@ -581,5 +929,19 @@ export function buildWorld(scene) {
     return best;
   }
 
-  return { update, resolve, groundAt, ladders, surfaces, solids, colliders, radius: RADIUS, treePos: new T.Vector3(10, 0, -10), spawn: new T.Vector3(1, 0, 1) };
+  // Is this point inside one of the rooms?
+  function indoors(x, z, y) {
+    return interiors.some(i => y >= i.yMin && y <= i.yMax
+      && (i.r !== undefined ? Math.hypot(x - i.x, z - i.z) < i.r : x > i.x0 && x < i.x1 && z > i.z0 && z < i.z1));
+  }
+
+  // Where the game starts, and where it puts the things ToneDa can use.
+  const inHouse = (lx, lz) => new T.Vector3(TH.x + lx, FY, TH.z + lz);
+  const spots = {
+    pot: { pos: inHouse(-2.3, 1.45) },                                    // flower pot, left of the door
+    vestChest: { pos: inHouse(3.4, 1.4), rotY: -Math.PI / 2 },            // chest at the foot of the bed
+    switchChest: eastHome.userData.nook,                                  // chest in the green-roofed stump home
+  };
+  return { update, resolve, groundAt, indoors, ladders, surfaces, solids, colliders, interiors, spots, radius: RADIUS, treePos: new T.Vector3(10, 0, -10),
+    spawn: inHouse(0, 0.3) };                                             // ToneDa wakes up inside his tree house, facing the door
 }
