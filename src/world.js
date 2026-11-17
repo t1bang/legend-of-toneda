@@ -820,9 +820,51 @@ export function buildWorld(scene) {
     if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) > 1.2) solids.push(o);
   });
 
+  // ---------- draw the village in a few big pieces ----------
+  // The village is well over a thousand small meshes. Handing them to the graphics card one at a
+  // time is slow, most of all on a phone, so every piece that shares a look is welded into one
+  // mesh for drawing. The small pieces stay where they are, unseen, so the camera and the
+  // Switch's shots still collide with them exactly as before.
+  scene.updateMatrixWorld(true);
+  const unseen = {}, welds = new Map(), vert = new T.Vector3(), turn = new T.Matrix3();
+  const lookOf = m => [m.type, m.color.getHexString(), m.map ? m.map.uuid : 0, m.side, m.flatShading, m.transparent, m.opacity, m.alphaTest, m.depthWrite,
+    m.polygonOffset ? m.polygonOffsetFactor : 0].join();
+  const hide = m => unseen[m.side] || (unseen[m.side] = new T.MeshBasicMaterial({ visible: false, side: m.side }));
+  scene.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some(m => m.vertexColors || !m.color)) return;       // the ground and the cliff keep their own shading
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv;
+    turn.getNormalMatrix(o.matrixWorld);
+    const parts = Array.isArray(o.material) ? g.groups : [{ start: 0, count: P.count, materialIndex: 0 }];
+    for (const part of parts) {
+      const m = mats[part.materialIndex], key = lookOf(m) + '/' + o.renderOrder;
+      let w = welds.get(key);
+      if (!w) welds.set(key, w = { material: m, renderOrder: o.renderOrder, pos: [], nor: [], uv: [] });
+      for (let i = part.start; i < part.start + part.count; i++) {
+        vert.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); w.pos.push(vert.x, vert.y, vert.z);
+        vert.fromBufferAttribute(N, i).applyMatrix3(turn).normalize(); w.nor.push(vert.x, vert.y, vert.z);
+        w.uv.push(U ? U.getX(i) : 0, U ? U.getY(i) : 0);
+      }
+    }
+    // out of the drawing, but still there to be hit (a mesh that carries others keeps them showing)
+    if (o.children.length) o.material = Array.isArray(o.material) ? mats.map(hide) : hide(o.material);
+    else o.visible = false;
+  });
+  for (const w of welds.values()) {
+    const g = new T.BufferGeometry();
+    g.setAttribute('position', new T.Float32BufferAttribute(w.pos, 3));
+    g.setAttribute('normal', new T.Float32BufferAttribute(w.nor, 3));
+    g.setAttribute('uv', new T.Float32BufferAttribute(w.uv, 2));
+    const mesh = new T.Mesh(g, w.material);
+    mesh.renderOrder = w.renderOrder;
+    scene.add(mesh);
+  }
+
   // Nothing in the village moves, so its transforms are worked out once here, not every frame.
   // (Anything added to the scene later, like ToneDa, Niggy and the Opps, still moves as normal.)
-  scene.updateMatrixWorld(true);
   scene.traverse(o => { if (o !== scene) o.matrixAutoUpdate = false; });
 
   let time = 0;
